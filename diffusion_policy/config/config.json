@@ -1,0 +1,15 @@
+{
+    "defaults": [
+      "image_pusht_diffusion_policy_cnn.yaml"
+    ],
+    "training": {
+      "seed": 42,
+      "device": "cuda:0"
+    },
+    "hydra": {
+      "run": {
+        "dir": "data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}"
+      }
+    }
+  }
+  

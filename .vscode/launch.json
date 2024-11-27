@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        
+
+        
+        
+        
+        {
+            "name": "Python 调试程序: 当前文件",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--config-name=train_diffusion_transformer_lowdim_kitchen_workspace.yaml"
+            ]
+        }
+    ]
+}
