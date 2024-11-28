@@ -230,8 +230,7 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
         beta_model = BetaNetwork(observation_dim=len(data['obs'][0, 0, :]), action_dim=len(data['action'][0, 0, :]), lr=1e-3, device='cuda:0',
                  model_type='Transformer', beta_coef=0.1)
 
-        beta_model.fit_data(num_epochs=200, batch_size=50, dataset=pref_data, save_dir='data/beta_model/kitchen'
-                            , load_dir='data/beta_model/kitchen/itr_200/beta_model.pth') #load_dir='data/beta_model/kitchen/itr_200/beta_model.pth',
+        beta_model.fit_data(num_epochs=400, batch_size=50, dataset=pref_data, save_dir='data/beta_model/kitchen') #load_dir='data/beta_model/kitchen/itr_200/beta_model.pth',
 
         obs_1 = data['obs']
         obs_2 = data['obs']

@@ -1,6 +1,7 @@
 import collections
 import numpy as np
 # import gym
+import torch.utils
 from tqdm import trange
 import torch
 import torch.nn as nn
@@ -310,6 +311,7 @@ class BetaNetwork(nn.Module):
                 beta_loss_1 = []
                 beta_loss_2 = []
                 beta_loss_3 = []
+                beta_loss_4 = []
                 beta_loss_all = []
 
                 batch_shuffled_idx = np.random.permutation(dataset["obs"].shape[0])
@@ -327,14 +329,22 @@ class BetaNetwork(nn.Module):
                     s_a_1 = np.concatenate([obs_1, act_1], axis=-1)
                     s_a_2 = np.concatenate([obs_2, act_2], axis=-1)
 
-                    conditions = [
+                    conditions_1 = [
                         np.all(batch['votes'] == 1, axis=1),
-                        np.all(batch['votes_2'] == 1, axis=1),
+                        np.all(batch['votes'] == 0, axis=1),
                         np.all(batch['votes'] == 0.5, axis=1)
                         ]
-                    values = [1, -1, 0]
-                    single_labels = torch.from_numpy(np.select(conditions, values)).float().to(self.device)
+                    values = [1, 0, 0]
+                    single_labels_1 = torch.from_numpy(np.select(conditions_1, values)).float().to(self.device)
 
+                    conditions_2 = [
+                        np.all(batch['votes_2'] == 1, axis=1),
+                        np.all(batch['votes_2'] == 0, axis=1),
+                        np.all(batch['votes_2'] == 0.5, axis=1)
+                        ]
+                    values = [1, 0, 0]
+                    single_labels_1 = torch.from_numpy(np.select(conditions_1, values)).float().to(self.device)
+                    single_labels_2 = torch.from_numpy(np.select(conditions_2, values)).float().to(self.device)
 
                     pred_1_alpha_beta = self.model(torch.from_numpy(s_a_1).float().to(self.device)) # batch_size * 2
                     pred_1_alpha = pred_1_alpha_beta[:, 0]
@@ -347,8 +357,8 @@ class BetaNetwork(nn.Module):
                     # if equal, then discard
                     # TODO maybe if equal, then both towards 1 (both preferred)
 
-                    loss_1 = torch.mean((torch.log(pred_1_alpha) + torch.log(pred_2_beta))* single_labels) \
-                            -torch.mean((torch.log(pred_2_alpha) + torch.log(pred_1_beta)) * single_labels)
+                    loss_1 = torch.mean((torch.log(pred_1_alpha) + torch.log(pred_2_beta))* single_labels_1) \
+                            + torch.mean((torch.log(pred_2_alpha) + torch.log(pred_1_beta)) * single_labels_2)
 
                     # var_1 = (pred_1_alpha * pred_1_beta) / ((pred_1_alpha + pred_1_beta) ** 2 * (pred_1_alpha + pred_1_beta + 1))
                     
@@ -359,17 +369,29 @@ class BetaNetwork(nn.Module):
                     loss_2 = torch.mean(torch.clamp(pred_1_alpha - 25, min=0) ** 2) + torch.mean(torch.clamp(pred_2_alpha - 25, min=0) ** 2) \
                             + torch.mean(torch.clamp(pred_1_beta - 25, min=0) ** 2) + torch.mean(torch.clamp(pred_2_beta - 25, min=0) ** 2)
                     
-                    # loss_3 = -1 * (pred_1_alpha.std()/pred_1_alpha.max() + pred_2_alpha.std()/pred_2_alpha.max() \
-                    #                + pred_1_beta.std()/pred_1_beta.max() + pred_2_beta.std()/pred_2_beta.max())
+                    # loss_3 = torch.log(4 / pred_1_alpha.std()) + (pred_1_alpha.var() + (pred_1_alpha.mean() - 12.5) ** 2) / (2 * 16) -0.5 \
+                    #         + torch.log(4 / pred_2_alpha.std()) + (pred_2_alpha.var() + (pred_2_alpha.mean() - 12.5) ** 2) / (2 * 16) -0.5 \
+                    #         + torch.log(4 / pred_1_beta.std()) + (pred_1_beta.var() + (pred_1_beta.mean() - 12.5) ** 2) / (2 * 16) -0.5 \
+                    #         + torch.log(4 / pred_2_beta.std()) + (pred_2_beta.var() + (pred_2_beta.mean() - 12.5) ** 2) / (2 * 16) -0.5
 
-                    loss_3 = self.kl_regularizer_loss(pred_1_alpha.shape[0], alpha=pred_1_alpha, beta=pred_1_beta) \
+                    controls = torch.distributions.Normal(12.5, 4).rsample((pred_1_alpha.shape[0],))
+                    controls = torch.sort(controls, dim=0)[0].to(self.device)
+
+                    loss_3 = torch.mean((torch.sort(pred_1_alpha, dim=0)[0] - controls) ** 2) \
+                            + torch.mean((torch.sort(pred_2_alpha, dim=0)[0] - controls) ** 2) \
+                            + torch.mean((torch.sort(pred_1_beta, dim=0)[0] - controls) ** 2) \
+                            + torch.mean((torch.sort(pred_2_beta, dim=0)[0] - controls) ** 2)
+
+                    loss_4 = self.kl_regularizer_loss(pred_1_alpha.shape[0], alpha=pred_1_alpha, beta=pred_1_beta) \
                             + self.kl_regularizer_loss(pred_2_alpha.shape[0], alpha=pred_2_alpha, beta=pred_2_beta)
 
-                    beta_loss = loss_1 + loss_2 + self.beta_coef * loss_3
+                    beta_loss = -loss_1 + loss_2 + loss_3 + self.beta_coef * loss_4
 
                     beta_loss_1.append(loss_1)
                     beta_loss_2.append(loss_2)
                     beta_loss_3.append(loss_3)
+                    beta_loss_4.append(loss_4)
+
                     beta_loss_all.append(beta_loss)
 
                     self.opt.zero_grad()
@@ -383,11 +405,13 @@ class BetaNetwork(nn.Module):
                 beta_loss_1 = torch.stack(beta_loss_1, dim=0)
                 beta_loss_2 = torch.stack(beta_loss_2, dim=0)
                 beta_loss_3 = torch.stack(beta_loss_3, dim=0)
+                beta_loss_4 = torch.stack(beta_loss_4, dim=0)
                 beta_loss_all = torch.stack(beta_loss_all, dim=0)
                 print("iteration:", epoch + 1)
                 print("mean_beta_loss_data:", torch.mean(beta_loss_1).item())
-                print("mean_beta_loss_data_2:", torch.mean(beta_loss_2).item())
-                print("mean_beta_loss_control:", torch.mean(beta_loss_3).item())
+                print("mean_beta_loss_control:", torch.mean(beta_loss_2).item())
+                print("mean_beta_loss_control_2:", torch.mean(beta_loss_3).item())
+                print("mean_beta_loss_kl:", torch.mean(beta_loss_4).item())
                 print("mean_beta_loss_all:", torch.mean(beta_loss_all).item())
 
                 if save_dir is not None and (epoch+1) % 200 == 0:

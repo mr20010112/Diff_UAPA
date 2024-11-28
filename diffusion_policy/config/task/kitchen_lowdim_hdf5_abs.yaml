@@ -39,7 +39,7 @@ origin_dataset:
 
 expert_dataset:
   _target_: diffusion_policy.dataset.kitchen_hdf5_lowdim_dataset.KitchenHdf5LowdimDataset
-  dataset_dir: data/kitchen/Minari/normal/kitchen_data_0.5_complete.h5
+  dataset_dir: data/kitchen/Minari/normal/kitchen_data_0.5_3.h5
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1'}
   pad_after: ${eval:'${n_action_steps}-1'}
@@ -50,7 +50,7 @@ expert_dataset:
 
 normal_dataset:
   _target_: diffusion_policy.dataset.kitchen_hdf5_lowdim_dataset.KitchenHdf5LowdimDataset
-  dataset_dir: data/kitchen/Minari/normal/kitchen_data_0.5_complete.h5
+  dataset_dir: data/kitchen/Minari/normal/kitchen_data_0.5_3.h5
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1'}
   pad_after: ${eval:'${n_action_steps}-1'}
@@ -64,4 +64,4 @@ pref_dataset:
   sequence_length: 240
   N: 500
   save_dir: data/pref_data/kitchen
-  # load_dir: data/pref_data/kitchen/kitchen_prefdata.h5
+  load_dir: data/pref_data/kitchen/kitchen_prefdata.h5

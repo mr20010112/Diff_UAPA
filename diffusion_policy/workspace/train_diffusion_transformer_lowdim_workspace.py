@@ -189,8 +189,8 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 step_log = dict()
                 # ========= train for this epoch ==========
                 train_losses = list()
-                map_loss = []
-                avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, model = self.model, ref_model = ref_model)
+                # map_loss = []
+                # avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, model = self.model, ref_model = ref_model)
                 with tqdm.tqdm(train_dataloader, desc=f"Training epoch {self.epoch}", 
                         leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
                     for batch_idx, batch in enumerate(tepoch):
@@ -200,11 +200,11 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                             train_sampling_batch = batch
 
                         # compute loss
-                        if self.global_step % cfg.training.update_all_loss == 0:
-                            avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, model = self.model, ref_model = ref_model)
-                        raw_loss, map_loss_batch = self.model.compute_loss(batch, ref_model=ref_model, avg_traj_loss=avg_traj_loss)
-                        map_loss_batch_numpy = [tensor.detach().cpu().numpy() for tensor in map_loss_batch]
-                        map_loss.append(map_loss_batch_numpy)
+                        # if self.global_step % cfg.training.update_all_loss == 0:
+                        #     avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, model = self.model, ref_model = ref_model)
+                        raw_loss = self.model.compute_loss(batch, ref_model=ref_model)
+                        # map_loss_batch_numpy = [tensor.detach().cpu().numpy() for tensor in map_loss_batch]
+                        # map_loss.append(map_loss_batch_numpy)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
                         loss.backward()
 
@@ -316,19 +316,19 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                         self.save_checkpoint(path=topk_ckpt_path)
                 # ========= eval end for this epoch ==========
 
-                # painting
-                map_loss = np.array(map_loss)
-                plt.figure(figsize=(10, 6))
-                for i in range(map_loss.shape[1]):
-                    plt.plot(map_loss[:, i], label=f'map_loss_{i + 1}')
+                # # painting
+                # map_loss = np.array(map_loss)
+                # plt.figure(figsize=(10, 6))
+                # for i in range(map_loss.shape[1]):
+                #     plt.plot(map_loss[:, i], label=f'map_loss_{i + 1}')
 
-                plt.title('MAP Loss')
-                plt.xlabel('epochs')
-                plt.ylabel('Loss值')
-                plt.legend()
-                plt.grid()
-                plt.show()
-                plt.savefig(f'/home/mrq/project/diffusion_policy-main-test/figures/{local_epoch_idx}_map_loss.png')
+                # plt.title('MAP Loss')
+                # plt.xlabel('epochs')
+                # plt.ylabel('Loss值')
+                # plt.legend()
+                # plt.grid()
+                # plt.show()
+                # plt.savefig(f'/home/mrq/project/diffusion_policy-main-test/figures/{local_epoch_idx}_map_loss.png')
 
                 policy.train()
 

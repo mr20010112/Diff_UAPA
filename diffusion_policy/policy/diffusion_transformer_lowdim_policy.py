@@ -307,34 +307,34 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 traj_loss_2 = traj_loss_2.to(torch.float64)
 
                 term = torch.ones(timesteps.shape, device=self.device, dtype=torch.float64)
-                beta_dist = Beta(beta_priori[:, 0], beta_priori[:, 1])
-                beta_dist_2 = Beta(beta_priori_2[:, 0], beta_priori_2[:, 1])
+                # beta_dist = Beta(beta_priori[:, 0], beta_priori[:, 1])
+                # beta_dist_2 = Beta(beta_priori_2[:, 0], beta_priori_2[:, 1])
 
-                max_idx_1 = (beta_priori[:, 0] - 1) / (beta_priori[:, 0] + beta_priori[:, 1] - 2)
-                max_idx_2 = (beta_priori_2[:, 0] - 1) / (beta_priori_2[:, 0] + beta_priori_2[:, 1] - 2)
+                # max_idx_1 = (beta_priori[:, 0] - 1) / (beta_priori[:, 0] + beta_priori[:, 1] - 2)
+                # max_idx_2 = (beta_priori_2[:, 0] - 1) / (beta_priori_2[:, 0] + beta_priori_2[:, 1] - 2)
 
                 mle_loss_1 = -F.logsigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_1 - traj_loss_2)))
                 mle_loss_2 = -F.logsigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_2 - traj_loss_1)))
 
-                map_loss_1 = -F.logsigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_1 - avg_traj_loss))) \
-                            + F.softplus(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_1 - avg_traj_loss))) \
-                            - beta_dist.log_prob(torch.clamp(torch.sigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * \
-                                (term * (traj_loss_1 - avg_traj_loss))), min=1e-4, max=1-1e-4)) + beta_dist.log_prob(torch.clamp(max_idx_1, min=1e-4, max=1-1e-4))
+                # map_loss_1 = -F.logsigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_1 - avg_traj_loss))) \
+                #             + F.softplus(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_1 - avg_traj_loss))) \
+                #             - beta_dist.log_prob(torch.clamp(torch.sigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * \
+                #                 (term * (traj_loss_1 - avg_traj_loss))), min=1e-4, max=1-1e-4)) + beta_dist.log_prob(torch.clamp(max_idx_1, min=1e-4, max=1-1e-4))
                             
-                map_loss_2 = -F.logsigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_2 - avg_traj_loss))) \
-                            + F.softplus(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_2 - avg_traj_loss))) \
-                            - beta_dist_2.log_prob(torch.clamp(torch.sigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * \
-                                (term * (traj_loss_2 - avg_traj_loss))), min=1e-4, max=1-1e-4)) + beta_dist_2.log_prob(torch.clamp(max_idx_2, min=1e-4, max=1-1e-4))
+                # map_loss_2 = -F.logsigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_2 - avg_traj_loss))) \
+                #             + F.softplus(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_2 - avg_traj_loss))) \
+                #             - beta_dist_2.log_prob(torch.clamp(torch.sigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * \
+                #                 (term * (traj_loss_2 - avg_traj_loss))), min=1e-4, max=1-1e-4)) + beta_dist_2.log_prob(torch.clamp(max_idx_2, min=1e-4, max=1-1e-4))
 
 
-                loss_1 = -F.logsigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_1 - avg_traj_loss)))
-                loss_2 = F.softplus(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_1 - avg_traj_loss)))
-                loss_3 = - beta_dist.log_prob(torch.clamp(torch.sigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * \
-                                (term * (traj_loss_1 - avg_traj_loss))), min=1e-4, max=1-1e-4)) + beta_dist.log_prob(torch.clamp(max_idx_1, min=1e-4, max=1-1e-4))
+                # loss_1 = -F.logsigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_1 - avg_traj_loss)))
+                # loss_2 = F.softplus(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_1 - avg_traj_loss)))
+                # loss_3 = - beta_dist.log_prob(torch.clamp(torch.sigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * \
+                #                 (term * (traj_loss_1 - avg_traj_loss))), min=1e-4, max=1-1e-4)) + beta_dist.log_prob(torch.clamp(max_idx_1, min=1e-4, max=1-1e-4))
                 
 
-                map_loss = [torch.mean(loss_1), torch.mean(loss_2), torch.mean(loss_3)]
+                # map_loss = [torch.mean(loss_1), torch.mean(loss_2), torch.mean(loss_3)]
 
-                loss += (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2 + self.map_ratio * (map_loss_1 + map_loss_2)) / (2 * self.train_time_samples[0]) #+ self.map_ratio * (map_loss_1 + map_loss_2)
+                loss += (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2) / (2 * self.train_time_samples[0]) #+ self.map_ratio * (map_loss_1 + map_loss_2)
 
-        return torch.mean(loss), map_loss
+        return torch.mean(loss)
