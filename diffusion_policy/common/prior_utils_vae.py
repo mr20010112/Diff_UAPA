@@ -158,6 +158,9 @@ class TransformerBetaModel(nn.Module):
         self.pos_emb = SinusoidalPosEmb(embedding_dim)
         encoder_layers = nn.TransformerEncoderLayer(d_model=embedding_dim, nhead=nhead, batch_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layers, num_layers=num_encoder_layers)
+        self.sigmoid = nn.Sigmoid()
+        self.encode_layer = nn.Linear(embedding_dim, embedding_dim)
+        self.relu = nn.ReLU()
         self.output_layer = nn.Linear(embedding_dim, output_dim)
         self.softplus = nn.Softplus()
 
@@ -168,6 +171,9 @@ class TransformerBetaModel(nn.Module):
             torch.arange(traj_len, device=self.device))[None,]
         x += pos  # Add positional encoding
         output = self.transformer_encoder(x)
+        output = self.sigmoid(output)
+        output = self.encode_layer(output)
+        output = self.relu(output)
         output = self.output_layer(output)
         # TODO mean or last one
         output = output.mean(dim=1)  # Aggregate across the sequence dimension
@@ -343,7 +349,6 @@ class BetaNetwork(nn.Module):
                         np.all(batch['votes_2'] == 0.5, axis=1)
                         ]
                     values = [1, 0, 0]
-                    single_labels_1 = torch.from_numpy(np.select(conditions_1, values)).float().to(self.device)
                     single_labels_2 = torch.from_numpy(np.select(conditions_2, values)).float().to(self.device)
 
                     pred_1_alpha_beta = self.model(torch.from_numpy(s_a_1).float().to(self.device)) # batch_size * 2
@@ -357,8 +362,8 @@ class BetaNetwork(nn.Module):
                     # if equal, then discard
                     # TODO maybe if equal, then both towards 1 (both preferred)
 
-                    loss_1 = torch.mean((torch.log(pred_1_alpha) + torch.log(pred_2_beta))* single_labels_1) \
-                            + torch.mean((torch.log(pred_2_alpha) + torch.log(pred_1_beta)) * single_labels_2)
+                    loss_1 = torch.mean((torch.log(pred_1_alpha) + torch.log(pred_2_beta))* single_labels_1 \
+                            + (torch.log(pred_2_alpha) + torch.log(pred_1_beta)) * single_labels_2)
 
                     # var_1 = (pred_1_alpha * pred_1_beta) / ((pred_1_alpha + pred_1_beta) ** 2 * (pred_1_alpha + pred_1_beta + 1))
                     
@@ -374,18 +379,31 @@ class BetaNetwork(nn.Module):
                     #         + torch.log(4 / pred_1_beta.std()) + (pred_1_beta.var() + (pred_1_beta.mean() - 12.5) ** 2) / (2 * 16) -0.5 \
                     #         + torch.log(4 / pred_2_beta.std()) + (pred_2_beta.var() + (pred_2_beta.mean() - 12.5) ** 2) / (2 * 16) -0.5
 
-                    controls = torch.distributions.Normal(12.5, 4).rsample((pred_1_alpha.shape[0],))
-                    controls = torch.sort(controls, dim=0)[0].to(self.device)
+                    controls_alpha_1 = torch.distributions.Normal(torch.mean(single_labels_1) * 12.5, \
+                                        (12.5 / 3) * torch.mean(single_labels_1)).rsample((pred_1_alpha.shape[0],))
+                    controls_alpha_1 = torch.sort(controls_alpha_1, dim=0)[0].to(self.device)
 
-                    loss_3 = torch.mean((torch.sort(pred_1_alpha, dim=0)[0] - controls) ** 2) \
-                            + torch.mean((torch.sort(pred_2_alpha, dim=0)[0] - controls) ** 2) \
-                            + torch.mean((torch.sort(pred_1_beta, dim=0)[0] - controls) ** 2) \
-                            + torch.mean((torch.sort(pred_2_beta, dim=0)[0] - controls) ** 2)
+                    controls_alpha_2 = torch.distributions.Normal(torch.mean(single_labels_2) * 12.5, \
+                                        (12.5 / 3) * torch.mean(single_labels_2)).rsample((pred_2_alpha.shape[0],))
+                    controls_alpha_2 = torch.sort(controls_alpha_2, dim=0)[0].to(self.device)
+
+                    controls_beta_1 = torch.distributions.Normal(torch.mean(single_labels_2) * 12.5, \
+                                        (12.5 / 3) * torch.mean(single_labels_2)).rsample((pred_2_alpha.shape[0],))
+                    controls_beta_1 = torch.sort(controls_beta_1, dim=0)[0].to(self.device)
+
+                    controls_beta_2 = torch.distributions.Normal(torch.mean(single_labels_1) * 12.5, \
+                                        (12.5 / 3) * torch.mean(single_labels_1)).rsample((pred_1_alpha.shape[0],))
+                    controls_beta_2 = torch.sort(controls_beta_2, dim=0)[0].to(self.device)
+
+                    loss_3 = torch.mean((torch.sort(pred_1_alpha, dim=0)[0] - controls_alpha_1) ** 2) \
+                            + torch.mean((torch.sort(pred_2_alpha, dim=0)[0] - controls_alpha_2) ** 2) \
+                            + torch.mean((torch.sort(pred_1_beta, dim=0)[0] - controls_beta_1) ** 2) \
+                            + torch.mean((torch.sort(pred_2_beta, dim=0)[0] - controls_beta_2) ** 2)
 
                     loss_4 = self.kl_regularizer_loss(pred_1_alpha.shape[0], alpha=pred_1_alpha, beta=pred_1_beta) \
                             + self.kl_regularizer_loss(pred_2_alpha.shape[0], alpha=pred_2_alpha, beta=pred_2_beta)
 
-                    beta_loss = -loss_1 + loss_2 + loss_3 + self.beta_coef * loss_4
+                    beta_loss = -loss_1 + loss_2 + loss_3 + self.beta_coef*loss_4
 
                     beta_loss_1.append(loss_1)
                     beta_loss_2.append(loss_2)

@@ -3,10 +3,23 @@ import numpy as np
 from diffusion_policy.common.pref_replay_buffer import PrefReplayBuffer
 import torch
 
+def get_val_mask(n_episodes, val_ratio, seed=0):
+    val_mask = np.zeros(n_episodes, dtype=bool)
+    if val_ratio <= 0:
+        return val_mask
+
+    # have at least 1 episode for validation, and at least 1 episode for train
+    n_val = min(max(1, round(n_episodes * val_ratio)), n_episodes-1)
+    rng = np.random.default_rng(seed=seed)
+    val_idxs = rng.choice(n_episodes, size=n_val, replace=False)
+    val_mask[val_idxs] = True
+    return val_mask
+
 class PrefSequenceSampler:
     def __init__(self,
                  replay_buffer: 'PrefReplayBuffer',
                  sequence_length: int,
+                 episode_mask: Optional[np.ndarray]=None,
                  keys: Optional[Dict[str, int]] = None,
                  ):
         """
@@ -29,9 +42,11 @@ class PrefSequenceSampler:
         self.keys = keys
         self.sequence_length = sequence_length
         self.replay_buffer = replay_buffer
+        self.episode_mask = episode_mask
 
     def __len__(self):
-        return self.replay_buffer.data['obs'].shape[0]
+        
+        return np.sum(self.episode_mask)
 
     def sample_sequence(self, idx: int) -> Dict[str, np.ndarray]:
         """
@@ -44,8 +59,8 @@ class PrefSequenceSampler:
         - A dictionary containing the sampled data for the specified keys and votes.
         """
         result = {}
-
-        result = self.replay_buffer.get_pref_episode(idx)
+        indices = np.where(self.episode_mask)[0]
+        result = self.replay_buffer.get_pref_episode(indices[idx])
 
         for key in result:
             result[key] = torch.from_numpy(result[key])

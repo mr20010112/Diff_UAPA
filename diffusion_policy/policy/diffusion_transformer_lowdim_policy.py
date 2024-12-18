@@ -10,7 +10,6 @@ from torch.distributions import Beta
 from scipy.stats import beta
 import torch.utils.checkpoint as checkpoint
 from torch.cuda.amp.autocast_mode import autocast
-from torch.cuda.amp.grad_scaler import GradScaler
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
 from diffusion_policy.model.common.normalizer import LinearNormalizer
@@ -35,7 +34,10 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             num_inference_steps=None,
             obs_as_cond=False,
             pred_action_steps_only=False,
-            map_ratio=0.1,
+            use_map=False,
+            map_batch_update=False,
+            map_ratio=1.0,
+            bias_reg=1.0,
             # parameters passed to step
             **kwargs):
         super().__init__()
@@ -63,7 +65,10 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         self.pred_action_steps_only = pred_action_steps_only
         self.gamma = gamma
         self.beta = beta
+        self.use_map = use_map
+        self.map_batch_update = map_batch_update
         self.map_ratio = map_ratio
+        self.bias_reg = bias_reg
         self.kwargs = kwargs
 
         if num_inference_steps is None:
@@ -190,34 +195,56 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 learning_rate=learning_rate, 
                 betas=tuple(betas))
 
-    def compute_loss(self, batch, ref_model: TransformerForDiffusion, avg_traj_loss=0):
-        ref_model = ref_model.to(self.device)
+    def compute_loss(self, batch, ref_model: TransformerForDiffusion, avg_traj_loss=0.0):
 
-        observations_1 = batch["obs"]
-        actions_1 = batch["action"]
-        votes_1 = batch["votes"]
-        observations_2 = batch["obs_2"]
-        actions_2 = batch["action_2"]
-        votes_2 = batch["votes_2"]
-        beta_priori = batch["beta_priori"]
-        beta_priori_2 = batch["beta_priori_2"]
-        avg_traj_loss = torch.tensor(avg_traj_loss, device=self.device, dtype=torch.float64)
+        ref_model.eval()
+        for param in ref_model.parameters():
+            param.requires_grad = False
+
+        observations_1 = batch["obs"].to(self.device)
+        actions_1 = batch["action"].to(self.device)
+        votes_1 = batch["votes"].to(self.device)
+        # votes_1[votes_1 == 0.5] = 0
+        beta_priori = batch["beta_priori"].to(self.device)
+        observations_2 = batch["obs_2"].to(self.device)
+        actions_2 = batch["action_2"].to(self.device)
+        votes_2 = batch["votes_2"].to(self.device)
+        # votes_2[votes_2 == 0.5] = 0
+        beta_priori_2 = batch["beta_priori_2"].to(self.device)
+        save_avg_traj_loss = torch.tensor(avg_traj_loss, device=self.device)
         # length = batch["length"]
         # length_2 = batch["length_2"]
 
-        batch = {
-            'obs': torch.stack([observations_1, observations_2], dim=0).to(self.device),
-            'action': torch.stack([actions_1, actions_2], dim=0).to(self.device),
+        threshold = 1e-3
+        diff = torch.abs(votes_1 - votes_2)
+        condition_1 = (votes_1 > votes_2) & (diff >= threshold)  # votes_1 > votes_2 且 diff >= threshold
+        condition_2 = (votes_1 < votes_2) & (diff >= threshold)  # votes_1 < votes_2 且 diff >= threshold
+
+        votes_1 = torch.where(condition_1, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device))
+        votes_1 = torch.squeeze(votes_1, dim=-1)
+        votes_2 = torch.where(condition_2, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device))
+        votes_2 = torch.squeeze(votes_2, dim=-1)
+
+        batch_1 = {
+            'obs': torch.tensor(observations_1, device=self.device),
+            'action': torch.tensor(actions_1, device=self.device),
         }
 
-        nbatch = self.normalizer.normalize(batch)
-        # vote_max = torch.max(torch.stack([votes_1, votes_2], dim=0))
-        # votes_1, votes_2 = votes / vote_max, votes_2 / vote_max
-        # votes_1 = torch.zeros(votes_1.shape, device=self.device, dtype=torch.float32)
-        # votes_2 = torch.zeros(votes_2.shape, device=self.device, dtype=torch.float32)
+        batch_2 = {
+            'obs': torch.tensor(observations_2, device=self.device),
+            'action': torch.tensor(actions_2, device=self.device),
+        }
 
-        obs_1, obs_2 = nbatch['obs'][0], nbatch['obs'][1]
-        action_1, action_2 = nbatch['action'][0], nbatch['action'][1]
+
+
+        nbatch_1 = self.normalizer.normalize(batch_1)
+        nbatch_2 = self.normalizer.normalize(batch_2)
+
+        obs_1 = nbatch_1['obs']
+        action_1 = nbatch_1['action']
+        obs_2 = nbatch_2['obs']
+        action_2 = nbatch_2['action']
+        # del nbatch_1, nbatch_2, batch_1, batch_2
 
         obs_1 = slice_episode(obs_1, horizon=self.horizon, stride=self.horizon)
         action_1 = slice_episode(action_1, horizon=self.horizon, stride=self.horizon)
@@ -227,114 +254,120 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         bsz = obs_1[0].shape[0]
         loss = 0
 
-        with autocast():
-            for _ in range(self.train_time_samples[0]):
-                timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=self.device).long()
+        for _ in range(self.train_time_samples[0]):
+            timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=self.device).long()
 
-                traj_loss_1, traj_loss_2 = 0, 0
-                condition_mask = []
+            traj_loss_1, traj_loss_2, avg_traj_loss = 0, 0, save_avg_traj_loss
+            # mseloss_1, mseloss_2 = 0, 0
+            condition_mask = []
 
-                for i in range(len(obs_1)):
-                    obs_1_slide = obs_1[i]
-                    action_1_slide = action_1[i]
+            for i in range(len(obs_1)):
+                obs_1_slide = obs_1[i]
+                action_1_slide = action_1[i]
 
-                    trajectory_1 = action_1_slide
+                trajectory_1 = action_1_slide
 
-                    if self.obs_as_cond:
-                        cond_1 = obs_1_slide[:, :self.n_obs_steps, :]
-                        cond_1 = cond_1.to(self.device)
-                        if self.pred_action_steps_only:
-                            trajectory_1 = action_1_slide[:, -self.n_action_steps:]
-                    else:
-                        trajectory_1 = torch.cat([action_1_slide, obs_1_slide], dim=-1)
-                    trajectory_1 = trajectory_1.to(self.device)
-                    condition_mask_1 = self.mask_generator(trajectory_1.shape).to(self.device)
-                    condition_mask.append(condition_mask_1)
-                    noise_1 = torch.randn(trajectory_1.shape, device=self.device)
-                    noisy_trajectory_1 = self.noise_scheduler.add_noise(trajectory_1, noise_1, timesteps)
+                if self.obs_as_cond:
+                    cond_1 = obs_1_slide[:, :self.n_obs_steps, :]
+                    cond_1 = cond_1.to(self.device)
+                    if self.pred_action_steps_only:
+                        trajectory_1 = action_1_slide[:, -self.n_action_steps:]
+                else:
+                    trajectory_1 = torch.cat([action_1_slide, obs_1_slide], dim=-1)
+                trajectory_1 = trajectory_1.to(self.device)
+                condition_mask_1 = self.mask_generator(trajectory_1.shape).to(self.device)
+                condition_mask.append(condition_mask_1)
+                noise_1 = torch.randn(trajectory_1.shape, device=self.device)
+                noisy_trajectory_1 = self.noise_scheduler.add_noise(trajectory_1, noise_1, timesteps)
 
-                    loss_mask_1 = ~condition_mask_1
-                    noisy_trajectory_1[condition_mask_1] = trajectory_1[condition_mask_1]
+                loss_mask_1 = ~condition_mask_1
+                noisy_trajectory_1[condition_mask_1] = trajectory_1[condition_mask_1]
 
-                    ref_pred_1 = ref_model(noisy_trajectory_1, timesteps, cond_1).detach()
-                    pred_1 = self.model(noisy_trajectory_1, timesteps, cond_1)
+                ref_pred_1 = ref_model(noisy_trajectory_1, timesteps, cond_1).detach()
+                pred_1 = self.model(noisy_trajectory_1, timesteps, cond_1)
 
-                    pred_type_1 = self.noise_scheduler.config.prediction_type
-                    target = noise_1 if pred_type_1 == 'epsilon' else trajectory_1
+                pred_type_1 = self.noise_scheduler.config.prediction_type
+                target = noise_1 if pred_type_1 == 'epsilon' else trajectory_1
 
-                    slice_loss_1 = torch.norm((noise_1 - pred_1) * loss_mask_1.type(pred_1.dtype), dim=-1) ** 2 \
-                                - torch.norm((noise_1 - ref_pred_1) * loss_mask_1.type(ref_pred_1.dtype), dim=-1) ** 2
-                    # slice_loss_1 = F.mse_loss(pred_1 * loss_mask_1.type(pred_1.dtype), target * loss_mask_1.type(target.dtype), reduction='none')
+                slice_loss_1 = torch.norm((pred_1 - noise_1) * loss_mask_1.type(pred_1.dtype), dim=-1) ** 2 \
+                            - torch.norm((ref_pred_1 - noise_1) * loss_mask_1.type(ref_pred_1.dtype), dim=-1) ** 2
+                # slice_loss_1 = F.mse_loss(pred_1 * loss_mask_1.type(pred_1.dtype), target * loss_mask_1.type(target.dtype), reduction='none')
 
-                    traj_loss_1 += (slice_loss_1) * (self.gamma ** (i*self.horizon + torch.arange(1, self.horizon + 1, device=self.device)))
+                traj_loss_1 += (slice_loss_1) * (self.gamma ** (i*self.horizon + torch.arange(1, self.horizon + 1, device=self.device)))
 
-                for i in range(len(obs_2)):
-                    obs_2_slide = obs_2[i]
-                    action_2_slide = action_2[i]
+            for i in range(len(obs_2)):
+                obs_2_slide = obs_2[i]
+                action_2_slide = action_2[i]
 
-                    trajectory_2 = action_2_slide
-                    if self.obs_as_cond:
-                        cond_2 = obs_2_slide[:, :self.n_obs_steps, :]
-                        cond_2 = cond_2.to(self.device)
-                        if self.pred_action_steps_only:
-                            trajectory_2 = action_2_slide[:, -self.n_action_steps:]
-                    else:
-                        trajectory_2 = torch.cat([action_2_slide, obs_2_slide], dim=-1)
-                    trajectory_2 = trajectory_2.to(self.device)
-                    condition_mask_2 = condition_mask[i]
-                    noise_2 = torch.randn(trajectory_2.shape, device=self.device)
-                    noisy_trajectory_2 = self.noise_scheduler.add_noise(trajectory_2, noise_2, timesteps)
+                trajectory_2 = action_2_slide
+                if self.obs_as_cond:
+                    cond_2 = obs_2_slide[:, :self.n_obs_steps, :]
+                    cond_2 = cond_2.to(self.device)
+                    if self.pred_action_steps_only:
+                        trajectory_2 = action_2_slide[:, -self.n_action_steps:]
+                else:
+                    trajectory_2 = torch.cat([action_2_slide, obs_2_slide], dim=-1)
+                trajectory_2 = trajectory_2.to(self.device)
+                # condition_mask_2 = self.mask_generator(trajectory_2.shape).to(self.device)
+                condition_mask_2 = condition_mask[i]
+                noise_2 = torch.randn(trajectory_2.shape, device=self.device)
+                noisy_trajectory_2 = self.noise_scheduler.add_noise(trajectory_2, noise_2, timesteps)
 
-                    loss_mask_2 = ~condition_mask_2
-                    noisy_trajectory_2[condition_mask_2] = trajectory_2[condition_mask_2]
+                loss_mask_2 = ~condition_mask_2
+                noisy_trajectory_2[condition_mask_2] = trajectory_2[condition_mask_2]
 
-                    ref_pred_2 = ref_model(noisy_trajectory_2, timesteps, cond_2).detach()
-                    pred_2 = self.model(noisy_trajectory_2, timesteps, cond_2)
+                ref_pred_2 = ref_model(noisy_trajectory_2, timesteps, cond_2).detach()
+                pred_2 = self.model(noisy_trajectory_2, timesteps, cond_2)
 
-                    pred_type_2 = self.noise_scheduler.config.prediction_type
-                    target = noise_2 if pred_type_2 == 'epsilon' else trajectory_2
+                pred_type_2 = self.noise_scheduler.config.prediction_type
+                target = noise_2 if pred_type_2 == 'epsilon' else trajectory_2
 
-                    slice_loss_2 = torch.norm((noise_2 - pred_2) * loss_mask_2.type(pred_2.dtype), dim=-1) ** 2\
-                                - torch.norm((noise_2 - ref_pred_2) * loss_mask_2.type(ref_pred_2.dtype), dim=-1) ** 2
-                    # slice_loss_2 = F.mse_loss(pred_2 * loss_mask_2.type(pred_2.dtype), target * loss_mask_2.type(target.dtype), reduction='none')
+                slice_loss_2 = torch.norm((pred_2 - noise_2) * loss_mask_2.type(pred_2.dtype), dim=-1) ** 2 \
+                            - torch.norm((ref_pred_2 - noise_2) * loss_mask_2.type(ref_pred_2.dtype), dim=-1) ** 2
+                # slice_loss_2 = F.mse_loss(pred_2 * loss_mask_2.type(pred_2.dtype), target * loss_mask_2.type(target.dtype), reduction='none')
 
-                    traj_loss_2 += (slice_loss_2) * (self.gamma ** (i*self.horizon + torch.arange(1, self.horizon + 1, device=self.device)))
+                traj_loss_2 += (slice_loss_2) * (self.gamma ** (i*self.horizon + torch.arange(1, self.horizon + 1, device=self.device)))
 
-                traj_loss_1 = torch.sum(traj_loss_1, dim=-1)
-                traj_loss_2 = torch.sum(traj_loss_2, dim=-1)
 
-                traj_loss_1 = traj_loss_1.to(torch.float64)
-                traj_loss_2 = traj_loss_2.to(torch.float64)
+            traj_loss_1 = torch.sum(traj_loss_1, dim=-1)
+            traj_loss_2 = torch.sum(traj_loss_2, dim=-1)
 
-                term = torch.ones(timesteps.shape, device=self.device, dtype=torch.float64)
-                # beta_dist = Beta(beta_priori[:, 0], beta_priori[:, 1])
-                # beta_dist_2 = Beta(beta_priori_2[:, 0], beta_priori_2[:, 1])
+            #batch size update
+            if self.use_map and self.map_batch_update:
+                avg_traj_loss = (torch.mean(traj_loss_1, dim=-1) + torch.mean(traj_loss_2, dim=-1)) / 2
 
-                # max_idx_1 = (beta_priori[:, 0] - 1) / (beta_priori[:, 0] + beta_priori[:, 1] - 2)
-                # max_idx_2 = (beta_priori_2[:, 0] - 1) / (beta_priori_2[:, 0] + beta_priori_2[:, 1] - 2)
+            # term = torch.ones(timesteps.shape, device=self.device)
 
-                mle_loss_1 = -F.logsigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_1 - traj_loss_2)))
-                mle_loss_2 = -F.logsigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_2 - traj_loss_1)))
+            traj_loss_1 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_1
+            traj_loss_2 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_2
+            avg_traj_loss = -self.beta * self.noise_scheduler.config.num_train_timesteps * avg_traj_loss
 
-                # map_loss_1 = -F.logsigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_1 - avg_traj_loss))) \
-                #             + F.softplus(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_1 - avg_traj_loss))) \
-                #             - beta_dist.log_prob(torch.clamp(torch.sigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * \
-                #                 (term * (traj_loss_1 - avg_traj_loss))), min=1e-4, max=1-1e-4)) + beta_dist.log_prob(torch.clamp(max_idx_1, min=1e-4, max=1-1e-4))
+            mle_loss_1 = -F.logsigmoid(traj_loss_1 - self.bias_reg*traj_loss_2)
+            mle_loss_2 = -F.logsigmoid(traj_loss_2 - self.bias_reg*traj_loss_1)
+
+
+            loss += (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2) / (2 * self.train_time_samples[0]) 
+            
+            if self.use_map:
+
+                beta_dist = Beta(beta_priori[:, 0], beta_priori[:, 1])
+                beta_dist_2 = Beta(beta_priori_2[:, 0], beta_priori_2[:, 1])
+
+                max_idx_1 = (beta_priori[:, 0] - 1) / (beta_priori[:, 0] + beta_priori[:, 1] - 2)
+                max_idx_2 = (beta_priori_2[:, 0] - 1) / (beta_priori_2[:, 0] + beta_priori_2[:, 1] - 2)
+
+                map_loss_1 = -F.logsigmoid(traj_loss_1 - avg_traj_loss) \
+                            + (traj_loss_1 - avg_traj_loss) \
+                            + F.softplus(avg_traj_loss - traj_loss_1) \
+                            - beta_dist.log_prob(torch.clamp(torch.sigmoid(traj_loss_1 - avg_traj_loss), min=1e-4, max=1-1e-4)) \
+                            + beta_dist.log_prob(torch.clamp(max_idx_1, min=1e-4, max=1-1e-4))
                             
-                # map_loss_2 = -F.logsigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_2 - avg_traj_loss))) \
-                #             + F.softplus(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_2 - avg_traj_loss))) \
-                #             - beta_dist_2.log_prob(torch.clamp(torch.sigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * \
-                #                 (term * (traj_loss_2 - avg_traj_loss))), min=1e-4, max=1-1e-4)) + beta_dist_2.log_prob(torch.clamp(max_idx_2, min=1e-4, max=1-1e-4))
-
-
-                # loss_1 = -F.logsigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_1 - avg_traj_loss)))
-                # loss_2 = F.softplus(-self.beta * self.noise_scheduler.config.num_train_timesteps * (term * (traj_loss_1 - avg_traj_loss)))
-                # loss_3 = - beta_dist.log_prob(torch.clamp(torch.sigmoid(-self.beta * self.noise_scheduler.config.num_train_timesteps * \
-                #                 (term * (traj_loss_1 - avg_traj_loss))), min=1e-4, max=1-1e-4)) + beta_dist.log_prob(torch.clamp(max_idx_1, min=1e-4, max=1-1e-4))
+                map_loss_2 = -F.logsigmoid(traj_loss_2 - avg_traj_loss) \
+                            + (traj_loss_2 - avg_traj_loss) \
+                            + F.softplus(avg_traj_loss - traj_loss_2) \
+                            - beta_dist_2.log_prob(torch.clamp(torch.sigmoid(traj_loss_2 - avg_traj_loss), min=1e-4, max=1-1e-4)) \
+                            + beta_dist_2.log_prob(torch.clamp(max_idx_2, min=1e-4, max=1-1e-4))
                 
-
-                # map_loss = [torch.mean(loss_1), torch.mean(loss_2), torch.mean(loss_3)]
-
-                loss += (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2) / (2 * self.train_time_samples[0]) #+ self.map_ratio * (map_loss_1 + map_loss_2)
+                loss += self.map_ratio * (map_loss_1 + map_loss_2) / (2 * self.train_time_samples[0])
 
         return torch.mean(loss)

@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 from torch.distributions import Beta
 
 # 定义 Beta 分布的参数
-alpha_values = [10.0, 20.0, 50.0, 100.0]
-beta_values = [10.0, 20.0, 50.0, 100.0]
+alpha_values = [1.0, 2.5, 5.0, 10.0]
+beta_values = [1.0, 2.5, 5.0, 10.0]
 
 # 定义 x 的取值范围
 x = torch.linspace(0.01, 0.99, 500, dtype=torch.float64) # 避免 0 和 1（Beta 分布在这些点上不定义）

@@ -29,7 +29,7 @@ def main(cfg: OmegaConf):
 
     cls = hydra.utils.get_class(cfg._target_)
     workspace: BaseWorkspace = cls(cfg)
-    workspace.load_checkpoint(path=cfg.checkpoint_dir)
+    # workspace.load_checkpoint(path=cfg.checkpoint_dir)
     workspace.run()
 
 if __name__ == "__main__":

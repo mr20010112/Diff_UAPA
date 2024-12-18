@@ -6,6 +6,7 @@ import pathlib
 import random
 import hydra
 import h5py
+import math
 from pathlib import Path
 from omegaconf import OmegaConf
 from hydra.utils import instantiate
@@ -19,7 +20,7 @@ from diffusion_policy.env.kitchen.kitchen_util import parse_mjl_logs
 from diffusion_policy.common.pref_replay_buffer import PrefReplayBuffer
 from diffusion_policy.common.pref_sampler import PrefSequenceSampler
 from typing import Optional, Dict
-from diffusion_policy.common.prior_utils import BetaNetwork
+from diffusion_policy.common.prior_utils_confidence import BetaNetwork
 
 #处理 "kitchen" 任务的低维数据集。该类从 .mjl 文件中解析数据，存储在 ReplayBuffer 中，并对数据进行采样
 
@@ -31,6 +32,8 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
                 sequence_length=1,
                 gamma=0.9999,
                 N=1,
+                seed=42,
+                val_ratio=0.0,
                 load_dir=None,
                 save_dir=None,
                 ):
@@ -88,17 +91,17 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
                     votes = np.zeros((1,))
                     votes_2 = np.zeros((1,))
                 else:
-                    flag = np.sum([gamma ** t * reward for t, reward in enumerate(episode_expert['reward'])])
-                    flag_2 = np.sum([gamma ** t * reward for t, reward in enumerate(episode_normal['reward'])])
-                    if np.abs(flag - flag_2) < 0.1:
-                        votes = np.array([0.5])
-                        votes_2 = np.array([0.5])
-                    elif flag > flag_2:
-                        votes = np.array([1.0])
-                        votes_2 = np.array([0.0])
-                    else:
-                        votes = np.array([0.0])
-                        votes_2 = np.array([1.0])
+                    votes = np.sum([gamma ** t * reward for t, reward in enumerate(episode_expert['reward'])])
+                    votes_2 = np.sum([gamma ** t * reward for t, reward in enumerate(episode_normal['reward'])])
+                    # if np.abs(flag - flag_2) < 1e-6:
+                    #     votes = np.array([0.5])
+                    #     votes_2 = np.array([0.5])
+                    # elif flag > flag_2:
+                    #     votes = np.array([1.0])
+                    #     votes_2 = np.array([0.0])
+                    # else:
+                    #     votes = np.array([0.0])
+                    #     votes_2 = np.array([1.0])
 
                 # votes = np.ones((1,))
                 # votes_2 = np.zeros((1,))
@@ -189,27 +192,22 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
                     }
                 )
 
-
+        val_mask = get_val_mask(
+            n_episodes=N, 
+            val_ratio=val_ratio,
+            seed=seed)
+        train_mask = ~val_mask
         #self.data = pref_dataset
         self.sampler = PrefSequenceSampler(
             replay_buffer=self.pref_replay_buffer,
             sequence_length=sequence_length,
+            episode_mask=train_mask,
         )
 
         self.length = N
+        self.train_mask = train_mask
+        self.sequence_length = sequence_length
 
-
-    # def get_validation_dataset(self):
-    #     val_set = copy.copy(self)
-    #     val_set.sampler = SequenceSampler(
-    #         replay_buffer=self.replay_buffer, 
-    #         sequence_length=self.horizon,
-    #         pad_before=self.pad_before, 
-    #         pad_after=self.pad_after,
-    #         episode_mask=~self.train_mask
-    #         )
-    #     val_set.train_mask = ~self.train_mask
-    #     return val_set
 
     # def get_normalizer(self, mode='limits', **kwargs):
 
@@ -227,37 +225,132 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
         pref_data.update(meta)
         if 'episode_ends' in pref_data.keys():
             del pref_data['episode_ends']
-        beta_model = BetaNetwork(observation_dim=len(data['obs'][0, 0, :]), action_dim=len(data['action'][0, 0, :]), lr=1e-3, device='cuda:0',
-                 model_type='Transformer', beta_coef=0.1)
+        beta_model = BetaNetwork(data=pref_data, lr=1.0e-4, device='cuda:0',
+                 data_size=150)
 
-        beta_model.fit_data(num_epochs=400, batch_size=50, dataset=pref_data, save_dir='data/beta_model/kitchen') #load_dir='data/beta_model/kitchen/itr_200/beta_model.pth',
+        batch_size = 10
+
+        beta_model.fit_data(num_epochs=120, batch_size=batch_size, dataset=pref_data, save_dir='data/beta_model/kitchen',
+            load_dir='data/beta_model/kitchen/itr_100/beta_model.pth'
+        ) #load_dir='data/beta_model/kitchen/itr_200/beta_model.pth',
 
         obs_1 = data['obs']
-        obs_2 = data['obs']
+        obs_2 = data['obs_2']
         action_1 = data['action']
-        action_2 = data['action']
+        action_2 = data['action_2']
         s_a_1 = np.concatenate([obs_1, action_1], axis=-1)
         s_a_2 = np.concatenate([obs_2, action_2], axis=-1)
 
-        alpha, beta = beta_model.get_alpha_beta(torch.from_numpy(s_a_1).float().to('cuda:0'))
-        alpha_2, beta_2 = beta_model.get_alpha_beta(torch.from_numpy(s_a_2).float().to('cuda:0'))
+        interval = math.ceil(s_a_1.shape[0] / batch_size)
+        alpha, beta = [], []
+        alpha_2, beta_2 = [], []
 
+        for i in range(interval):
+            start_pt = i * batch_size
+            end_pt = min((i + 1) * batch_size, s_a_1.shape[0])
+            batch_s_a_1 = s_a_1[start_pt:end_pt, ...]
+            batch_s_a_2 = s_a_2[start_pt:end_pt, ...]
+
+            batch_alpha, batch_beta = beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_1).float().to('cuda:0'))
+            batch_alpha_2, batch_beta_2 = beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_2).float().to('cuda:0'))
+
+            alpha.append(batch_alpha)
+            beta.append(batch_beta)
+            alpha_2.append(batch_alpha_2)
+            beta_2.append(batch_beta_2)
+
+        alpha = torch.clamp(torch.cat(alpha, dim=0)+1, max=60)
+        beta = torch.clamp(torch.cat(beta, dim=0)+1, max=60)
+        alpha_2 = torch.clamp(torch.cat(alpha_2, dim=0)+1, max=60)
+        beta_2 = torch.clamp(torch.cat(beta_2, dim=0)+1, max=60)
+
+        # 计算所有张量的全局最大值和最小值
         max_value = torch.max(torch.cat([alpha, beta, alpha_2, beta_2]))
         min_value = torch.min(torch.cat([alpha, beta, alpha_2, beta_2]))
+        mean_value = torch.mean(torch.cat([alpha, beta, alpha_2, beta_2]))
+        std_value = torch.std(torch.cat([alpha, beta, alpha_2, beta_2]))
 
+        # Define the scaling function
         def scale_to_range(x, min_val, max_val, target_min=1, target_max=25):
+            """
+            Scale tensor x to the target range [target_min, target_max].
+
+            Parameters:
+                x (torch.Tensor): Input tensor to be scaled.
+                min_val (float): Minimum value of the input range.
+                max_val (float): Maximum value of the input range.
+                target_min (float): Minimum value of the target range.
+                target_max (float): Maximum value of the target range.
+
+            Returns:
+                torch.Tensor: Scaled tensor.
+            """
+            if min_val == max_val:
+                raise ValueError("min_val and max_val must be different to avoid division by zero.")
             return target_min + (x - min_val) * (target_max - target_min) / (max_val - min_val)
 
-        alpha = scale_to_range(alpha, min_value, max_value)
-        beta = scale_to_range(beta, min_value, max_value)
-        alpha_2 = scale_to_range(alpha_2, min_value, max_value)
-        beta_2 = scale_to_range(beta_2, min_value, max_value)
+        # Define unified scaling logic
+        def scale_tensor(x, global_min, global_max, target_min=1, target_max=25):
+            """
+            Scale tensor x based on global minimum and maximum, applying proportional adjustment.
+
+            Parameters:
+                x (torch.Tensor): Input tensor to be scaled.
+                global_min (float): Global minimum value for proportional scaling.
+                global_max (float): Global maximum value for proportional scaling.
+                target_min (float): Minimum value of the target range.
+                target_max (float): Maximum value of the target range.
+
+            Returns:
+                torch.Tensor: Scaled tensor.
+            """
+            # Ensure the tensor is a floating-point tensor
+            if not torch.is_floating_point(x):
+                x = x.float()
+
+            local_min, local_max = torch.min(x), torch.max(x)
+
+            # Handle division by zero for local range
+            if local_min == local_max:
+                return torch.full_like(x, target_min)  # Return tensor filled with target_min
+
+            # Handle division by zero for global range
+            if global_min < 1:
+                global_min = 1  # Replace 0 with a small positive value to avoid division by zero
+            if global_min == global_max:
+                raise ValueError("global_min and global_max must be different to avoid division by zero.")
+
+            # Compute scaled local range
+            scaled_min = (local_min / global_min) * target_min
+            scaled_max = (local_max / global_max) * target_max
+
+            # Apply scaling
+            return scale_to_range(x, local_min, local_max, scaled_min, scaled_max)
+
+        # 设置目标范围
+        target_min, target_max = 1, 10
+
+        # 按全局和局部范围缩放张量
+        alpha = scale_tensor(alpha, min_value, max_value, target_min, target_max)
+        beta = scale_tensor(beta, min_value, max_value, target_min, target_max)
+        alpha_2 = scale_tensor(alpha_2, min_value, max_value, target_min, target_max)
+        beta_2 = scale_tensor(beta_2, min_value, max_value, target_min, target_max)
 
         self.pref_replay_buffer.meta['beta_priori'] = np.array([alpha.cpu().numpy(), beta.cpu().numpy()]).T
         self.pref_replay_buffer.meta['beta_priori_2'] = np.array([alpha_2.cpu().numpy(), beta_2.cpu().numpy()]).T
 
+    def get_validation_dataset(self):
+        val_set = copy.copy(self)
+        val_set.sampler = PrefSequenceSampler(
+            replay_buffer=self.pref_replay_buffer, 
+            sequence_length=self.sequence_length,
+            episode_mask=~self.train_mask,
+            )
+        val_set.train_mask = ~self.train_mask
+        return val_set
+
     def get_all_actions(self) -> torch.Tensor:
-        actions = np.cat(self.pref_replay_buffer.data['action'], self.pref_replay_buffer.data['action_2'], dim = 0)
+        actions = np.concatenate(self.pref_replay_buffer.data['action'], self.pref_replay_buffer.data['action_2'], dim = 0)
         return torch.from_numpy(actions)
 
     def __len__(self) -> int:

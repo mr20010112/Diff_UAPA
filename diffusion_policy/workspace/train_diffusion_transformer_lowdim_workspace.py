@@ -70,24 +70,30 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         cfg = copy.deepcopy(self.cfg)
 
         # resume training
-        ref_model = copy.deepcopy(self.model.model) #add
-        device = torch.device(cfg.training.device_gpu) #add
-        ref_model.to(device)
-        self.model.to(device)
-        #device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") #add
-
         if cfg.training.resume:
-            lastest_ckpt_path = self.get_checkpoint_path()
-            if lastest_ckpt_path.is_file():
-                print(f"Resuming from checkpoint {lastest_ckpt_path}")
-                self.load_checkpoint(path=lastest_ckpt_path)
+            ckpt_path = pathlib.Path(cfg.checkpoint_dir)
+            if ckpt_path.is_file():
+                print(f"Resuming from checkpoint {ckpt_path}")
+                self.load_checkpoint(path=ckpt_path)
+            self.optimizer = self.model.get_optimizer(**cfg.optimizer)
+            self.global_step = 0
+            self.epoch = 0
+
+        device = torch.device(cfg.training.device_gpu)
+        ref_model = copy.deepcopy(self.model.model)
+        # ref_model.double()
+        ref_model.eval() 
+        for param in ref_model.parameters():
+            param.requires_grad = False
+        ref_model.to(device)
+
+        #device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") #add
 
         # configure dataset
         dataset: BaseLowdimDataset
         dataset = hydra.utils.instantiate(cfg.task.origin_dataset)
         #device = torch.device(cfg.training.device_cpu)
         assert isinstance(dataset, BaseLowdimDataset)
-        #train_dataloader = DataLoader(dataset, **cfg.dataloader)
         normalizer = dataset.get_normalizer()
 
         # configure dataset
@@ -95,13 +101,12 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         expert_dataset = hydra.utils.instantiate(cfg.task.expert_dataset)
         #device = torch.device(cfg.training.device_cpu)
         assert isinstance(expert_dataset, BaseLowdimDataset)
-        # train_dataloader = DataLoader(dataset, **cfg.dataloader)
-        # normalizer = dataset.get_normalizer()
+
 
         # configure dataset
         normal_dataset: BaseLowdimDataset
         normal_dataset = hydra.utils.instantiate(cfg.task.normal_dataset)
-        #device = torch.device(cfg.training.device_cpu)
+        # expert_normalizer = normal_dataset.get_normalizer()
         assert isinstance(normal_dataset, BaseLowdimDataset)
 
         pref_dataset: BaseLowdimDataset
@@ -111,9 +116,13 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset, expert_dataset, normal_dataset
 
+        # configure validation dataset
+        val_dataset = pref_dataset.get_validation_dataset()
+        val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
 
         self.model.set_normalizer(normalizer)
         if cfg.training.use_ema:
+            # self.ema_model.double()
             self.ema_model.set_normalizer(normalizer)
 
         # configure lr scheduler
@@ -124,9 +133,11 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             num_training_steps=(
                 len(train_dataloader) * cfg.training.num_epochs) \
                     // cfg.training.gradient_accumulate_every,
-            # pytorch assumes stepping LRScheduler every epoch
-            # however huggingface diffusers steps it every batch
-            last_epoch=self.global_step-1
+            # # pytorch assumes stepping LRScheduler every epoch
+            # # however huggingface diffusers steps it every batch
+            # lr_end=cfg.training.lr_end,
+            # num_cycles=cfg.training.num_cycles,
+            last_epoch=self.global_step-1,
         )
 
         # configure ema
@@ -152,6 +163,7 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         wandb.config.update(
             {
                 "output_dir": self.output_dir,
+                "timeout": 300,
             }
         )
 
@@ -188,6 +200,9 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             for local_epoch_idx in range(cfg.training.num_epochs):
                 step_log = dict()
                 # ========= train for this epoch ==========
+                self.model.train()
+                if self.ema_model is not None:
+                    self.ema_model.train()
                 train_losses = list()
                 # map_loss = []
                 # avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, model = self.model, ref_model = ref_model)
@@ -200,9 +215,10 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                             train_sampling_batch = batch
 
                         # compute loss
-                        # if self.global_step % cfg.training.update_all_loss == 0:
-                        #     avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, model = self.model, ref_model = ref_model)
-                        raw_loss = self.model.compute_loss(batch, ref_model=ref_model)
+                        avg_traj_loss = 0.0
+                        if cfg.training.map.use_map and (not cfg.training.map.map_batch_update):
+                            avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, model = self.model, ref_model = ref_model)
+                        raw_loss = self.model.compute_loss(batch, ref_model=ref_model, avg_traj_loss = avg_traj_loss)
                         # map_loss_batch_numpy = [tensor.detach().cpu().numpy() for tensor in map_loss_batch]
                         # map_loss.append(map_loss_batch_numpy)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
@@ -257,7 +273,25 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                     runner_log = env_runner.run(policy)
                     # log all
                     step_log.update(runner_log)
-            
+
+                # run validation
+                if (self.epoch % cfg.training.val_every) == 0:
+                    with torch.no_grad():
+                        val_losses = list()
+                        with tqdm.tqdm(val_dataloader, desc=f"Validation epoch {self.epoch}", 
+                                leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
+                            for batch_idx, batch in enumerate(tepoch):
+                                batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
+                                loss = self.model.compute_loss(batch, ref_model=ref_model, avg_traj_loss = avg_traj_loss)
+                                val_losses.append(loss)
+                                if (cfg.training.max_val_steps is not None) \
+                                    and batch_idx >= (cfg.training.max_val_steps-1):
+                                    break
+                        if len(val_losses) > 0:
+                            val_loss = torch.mean(torch.tensor(val_losses)).item()
+                            # log epoch average validation loss
+                            step_log['val_loss'] = val_loss
+
                 # run diffusion sampling on a training batch
                 if (self.epoch % cfg.training.sample_every) == 0:
                     with torch.no_grad():

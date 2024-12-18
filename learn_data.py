@@ -3,9 +3,9 @@ import numpy as np
 
 # 定义文件路径
 file_paths = [
-    "data/kitchen/Minari/normal/kitchen_data_0.5.h5",
-    "data/kitchen/Minari/normal/kitchen_data_0.5_2.h5",
-    "data/kitchen/Minari/normal/kitchen_data_0.5_3.h5",
+    "data/kitchen/Minari/normal/epoch=25/kitchen_data_0.5.h5",
+    "data/kitchen/Minari/normal/epoch=25/kitchen_data_0.5_2.h5",
+    "data/kitchen/Minari/normal/epoch=25/kitchen_data_0.5_3.h5",
 ]
 
 # 初始化一个字典，用于存储堆叠后的数据
@@ -26,7 +26,7 @@ for file_path in file_paths:
                 stacked_data[key] = np.concatenate((stacked_data[key], f[key][()]))
 
 # 保存堆叠后的数据为一个新的 HDF5 文件
-output_path = "data/kitchen/Minari/normal/kitchen_data_0.5_complete.h5"
+output_path = "data/kitchen/Minari/normal/epoch=25/kitchen_data_0.5_complete.h5"
 with h5py.File(output_path, 'w') as f:
     for key, value in stacked_data.items():
         f.create_dataset(key, data=value)
