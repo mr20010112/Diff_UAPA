@@ -349,21 +349,6 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                     if topk_ckpt_path is not None:
                         self.save_checkpoint(path=topk_ckpt_path)
                 # ========= eval end for this epoch ==========
-
-                # # painting
-                # map_loss = np.array(map_loss)
-                # plt.figure(figsize=(10, 6))
-                # for i in range(map_loss.shape[1]):
-                #     plt.plot(map_loss[:, i], label=f'map_loss_{i + 1}')
-
-                # plt.title('MAP Loss')
-                # plt.xlabel('epochs')
-                # plt.ylabel('Loss值')
-                # plt.legend()
-                # plt.grid()
-                # plt.show()
-                # plt.savefig(f'/home/mrq/project/diffusion_policy-main-test/figures/{local_epoch_idx}_map_loss.png')
-
                 policy.train()
 
                 # end of epoch

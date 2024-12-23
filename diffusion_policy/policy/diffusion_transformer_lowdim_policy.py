@@ -215,15 +215,21 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         # length = batch["length"]
         # length_2 = batch["length_2"]
 
+        beta_priori = beta_priori + 1
+        beta_priori_2 = beta_priori_2 + 1
+
         threshold = 1e-3
         diff = torch.abs(votes_1 - votes_2)
-        condition_1 = (votes_1 > votes_2) & (diff >= threshold)  # votes_1 > votes_2 且 diff >= threshold
-        condition_2 = (votes_1 < votes_2) & (diff >= threshold)  # votes_1 < votes_2 且 diff >= threshold
+        condition_1 = (votes_1 > votes_2) & (diff >= threshold)  # votes_1 > votes_2 and diff >= threshold
+        condition_2 = (votes_1 < votes_2) & (diff >= threshold)  # votes_1 < votes_2 and diff >= threshold
 
         votes_1 = torch.where(condition_1, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device))
         votes_1 = torch.squeeze(votes_1, dim=-1)
         votes_2 = torch.where(condition_2, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device))
         votes_2 = torch.squeeze(votes_2, dim=-1)
+
+        # chaos labels
+        
 
         batch_1 = {
             'obs': torch.tensor(observations_1, device=self.device),
@@ -353,20 +359,15 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 beta_dist = Beta(beta_priori[:, 0], beta_priori[:, 1])
                 beta_dist_2 = Beta(beta_priori_2[:, 0], beta_priori_2[:, 1])
 
-                max_idx_1 = (beta_priori[:, 0] - 1) / (beta_priori[:, 0] + beta_priori[:, 1] - 2)
-                max_idx_2 = (beta_priori_2[:, 0] - 1) / (beta_priori_2[:, 0] + beta_priori_2[:, 1] - 2)
+                # max_idx_1 = (beta_priori[:, 0] - 1) / (beta_priori[:, 0] + beta_priori[:, 1] - 2)
+                # max_idx_2 = (beta_priori_2[:, 0] - 1) / (beta_priori_2[:, 0] + beta_priori_2[:, 1] - 2)
 
-                map_loss_1 = -F.logsigmoid(traj_loss_1 - avg_traj_loss) \
-                            + (traj_loss_1 - avg_traj_loss) \
-                            + F.softplus(avg_traj_loss - traj_loss_1) \
-                            - beta_dist.log_prob(torch.clamp(torch.sigmoid(traj_loss_1 - avg_traj_loss), min=1e-4, max=1-1e-4)) \
-                            + beta_dist.log_prob(torch.clamp(max_idx_1, min=1e-4, max=1-1e-4))
+                map_loss_1 = - beta_dist.log_prob(torch.clamp(torch.sigmoid(traj_loss_1 - avg_traj_loss), min=1e-4, max=1-1e-4)) \
+                            # + beta_dist.log_prob(torch.clamp(max_idx_1, min=1e-4, max=1-1e-4))
                             
-                map_loss_2 = -F.logsigmoid(traj_loss_2 - avg_traj_loss) \
-                            + (traj_loss_2 - avg_traj_loss) \
-                            + F.softplus(avg_traj_loss - traj_loss_2) \
-                            - beta_dist_2.log_prob(torch.clamp(torch.sigmoid(traj_loss_2 - avg_traj_loss), min=1e-4, max=1-1e-4)) \
-                            + beta_dist_2.log_prob(torch.clamp(max_idx_2, min=1e-4, max=1-1e-4))
+                map_loss_2 = - beta_dist_2.log_prob(torch.clamp(torch.sigmoid(traj_loss_2 - avg_traj_loss), min=1e-4, max=1-1e-4)) \
+                            # + beta_dist_2.log_prob(torch.clamp(max_idx_2, min=1e-4, max=1-1e-4))
+
                 
                 loss += self.map_ratio * (map_loss_1 + map_loss_2) / (2 * self.train_time_samples[0])
 

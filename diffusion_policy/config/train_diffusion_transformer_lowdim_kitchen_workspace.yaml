@@ -81,16 +81,16 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 20
+  batch_size: 25
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 20
+  batch_size: 25
   num_workers: 1
-  shuffle: False
+  shuffle: True
   pin_memory: True
   persistent_workers: False
 
@@ -101,7 +101,7 @@ optimizer:
 
 training:
   device_cpu: "cpu"
-  device_gpu: "cuda:0"
+  device_gpu: "cuda:1"
   seed: 42
   debug: False
   resume: True
@@ -128,7 +128,7 @@ training:
   map:
     use_map: True
     map_batch_update: False
-    map_ratio: 1.0
+    map_ratio: 0.25
 
 
 logging:

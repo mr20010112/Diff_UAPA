@@ -225,15 +225,16 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
         pref_data.update(meta)
         if 'episode_ends' in pref_data.keys():
             del pref_data['episode_ends']
-        beta_model = BetaNetwork(data=pref_data, lr=1.0e-4, device='cuda:0',
+
+        device = 'cuda:1'
+        beta_model = BetaNetwork(data=pref_data, lr=1.0e-5, device=device,
                  data_size=150)
 
-        batch_size = 10
+        batch_size = 6
 
-        beta_model.fit_data(num_epochs=120, batch_size=batch_size, dataset=pref_data, save_dir='data/beta_model/kitchen',
-            load_dir='data/beta_model/kitchen/itr_100/beta_model.pth'
-        ) #load_dir='data/beta_model/kitchen/itr_200/beta_model.pth',
-
+        beta_model.fit_data(num_epochs=20, warm_up_epochs=4, batch_size=batch_size, dataset=pref_data, save_dir='data/beta_model/kitchen', 
+        load_dir='data/beta_model/kitchen/saved/beta_model.pth') 
+        
         obs_1 = data['obs']
         obs_2 = data['obs_2']
         action_1 = data['action']
@@ -251,24 +252,30 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
             batch_s_a_1 = s_a_1[start_pt:end_pt, ...]
             batch_s_a_2 = s_a_2[start_pt:end_pt, ...]
 
-            batch_alpha, batch_beta = beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_1).float().to('cuda:0'))
-            batch_alpha_2, batch_beta_2 = beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_2).float().to('cuda:0'))
+            batch_alpha, batch_beta = beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_1).float().to(device))
+            batch_alpha_2, batch_beta_2 = beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_2).float().to(device))
 
             alpha.append(batch_alpha)
             beta.append(batch_beta)
             alpha_2.append(batch_alpha_2)
             beta_2.append(batch_beta_2)
 
-        alpha = torch.clamp(torch.cat(alpha, dim=0)+1, max=60)
-        beta = torch.clamp(torch.cat(beta, dim=0)+1, max=60)
-        alpha_2 = torch.clamp(torch.cat(alpha_2, dim=0)+1, max=60)
-        beta_2 = torch.clamp(torch.cat(beta_2, dim=0)+1, max=60)
+        alpha = torch.cat(alpha, dim=0)+1
+        beta = torch.cat(beta, dim=0)+1
+        alpha_2 = torch.cat(alpha_2, dim=0)+1
+        beta_2 = torch.cat(beta_2, dim=0)+1
+
+        mean_value = torch.mean(torch.cat([alpha, beta, alpha_2, beta_2]))
+        std_value = torch.std(torch.cat([alpha, beta, alpha_2, beta_2]))
+
+        alpha = torch.clamp(alpha, max=mean_value+3*std_value)
+        beta = torch.clamp(beta, max=mean_value+3*std_value)
+        alpha_2 = torch.clamp(alpha_2, max=mean_value+3*std_value)
+        beta_2 = torch.clamp(beta_2, max=mean_value+3*std_value)
 
         # 计算所有张量的全局最大值和最小值
         max_value = torch.max(torch.cat([alpha, beta, alpha_2, beta_2]))
         min_value = torch.min(torch.cat([alpha, beta, alpha_2, beta_2]))
-        mean_value = torch.mean(torch.cat([alpha, beta, alpha_2, beta_2]))
-        std_value = torch.std(torch.cat([alpha, beta, alpha_2, beta_2]))
 
         # Define the scaling function
         def scale_to_range(x, min_val, max_val, target_min=1, target_max=25):
@@ -315,8 +322,8 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
                 return torch.full_like(x, target_min)  # Return tensor filled with target_min
 
             # Handle division by zero for global range
-            if global_min < 1:
-                global_min = 1  # Replace 0 with a small positive value to avoid division by zero
+            # if global_min < 1:
+            #     global_min = 1  # Replace 0 with a small positive value to avoid division by zero
             if global_min == global_max:
                 raise ValueError("global_min and global_max must be different to avoid division by zero.")
 
@@ -335,6 +342,21 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
         beta = scale_tensor(beta, min_value, max_value, target_min, target_max)
         alpha_2 = scale_tensor(alpha_2, min_value, max_value, target_min, target_max)
         beta_2 = scale_tensor(beta_2, min_value, max_value, target_min, target_max)
+
+        scores_1 = alpha - beta
+        scores_2 = alpha_2 - beta_2
+        scores = torch.cat([scores_1, scores_2], dim = 0)
+        scores = (scores - scores.min()) / (scores.max() - scores.min())
+
+        votes_1 = torch.from_numpy(meta['votes'])
+        votes_2 = torch.from_numpy(meta['votes_2'])
+        votes = torch.cat([votes_1, votes_2], dim = 0)
+        votes = votes.squeeze(dim = 1)
+        votes = votes.to(device=scores.device)
+        votes = torch.clamp(votes, min=0, max=(votes.mean() + 3 * votes.std()).item())
+        votes = (votes - votes.min()) / (votes.max() - votes.min())
+
+        error = torch.mean(torch.abs(scores - votes))
 
         self.pref_replay_buffer.meta['beta_priori'] = np.array([alpha.cpu().numpy(), beta.cpu().numpy()]).T
         self.pref_replay_buffer.meta['beta_priori_2'] = np.array([alpha_2.cpu().numpy(), beta_2.cpu().numpy()]).T
