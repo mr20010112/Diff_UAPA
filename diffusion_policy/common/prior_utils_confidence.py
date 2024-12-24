@@ -10,7 +10,8 @@ import math
 from tqdm import tqdm
 import torch.nn.functional as F
 from pathlib import Path
-
+import copy
+from torch.optim.lr_scheduler import SequentialLR, LinearLR, CosineAnnealingLR
 
 Batch = collections.namedtuple(
     'Batch',
@@ -204,17 +205,15 @@ class TransformerComparisonModel(nn.Module):
         return output
 
 class AttentionComparisonModel(nn.Module):
-    def __init__(self, input_dim, dense_units, dropout_rate, nhead, device):
+    def __init__(self, input_dim, dropout_rate, nhead, device):
         super(AttentionComparisonModel, self).__init__()
 
         self.attention = nn.MultiheadAttention(embed_dim=input_dim, num_heads=nhead, batch_first=True)
-        self.query_diff = nn.Parameter(torch.randn(1, input_dim))  # Learnable query for diff
         self.query_attn = nn.Parameter(torch.randn(1, input_dim))  # Learnable query for attention
 
-        self.fc1 = nn.Linear(2 * input_dim, dense_units)
+        self.fc1 = nn.Linear(input_dim, input_dim // 2)
         self.dropout = nn.Dropout(dropout_rate)
-        self.fc2 = nn.Linear(dense_units, dense_units // 2)
-        self.output = nn.Linear(dense_units // 2, 1)
+        self.output = nn.Linear(input_dim // 2, 1)
         self.device = device
         self.to(device)
 
@@ -236,24 +235,27 @@ class AttentionComparisonModel(nn.Module):
 
         attn_out, _ = self.attention(f1_flat, f2_flat, f2_flat)
 
-        # Apply self-attention weighted compression
-        diff = f1_flat - f2_flat  # Element-wise difference
-        diff_reduced = self.attention_pool(diff, self.query_diff)
-
         attn_reduced = self.attention_pool(attn_out, self.query_attn)
 
-        # Concatenate features
-        combined = torch.cat([
-            diff_reduced,
-            attn_reduced,
-        ], dim=-1)
-
-        x = F.gelu(self.fc1(combined))
+        x = F.gelu(self.fc1(attn_reduced))
         x = self.dropout(x)
-        x = F.gelu(self.fc2(x))
         x = self.output(x)
         output = torch.sigmoid(x)
         output = output.view(N1, N2)
+        return output
+
+    def one_to_one_forward(self, f1, f2):
+        f1, f2 = f1.to(self.device), f2.to(self.device)
+
+        attn_out, _ = self.attention(f1, f2, f2)
+
+        # Apply self-attention weighted compression
+        attn_reduced = self.attention_pool(attn_out, self.query_attn)
+
+        x = F.gelu(self.fc1(attn_reduced))
+        x = self.dropout(x)
+        x = self.output(x)
+        output = torch.sigmoid(x)
         return output
 
 
@@ -322,10 +324,8 @@ class CausalTransformerBetaModel(nn.Module):
         return output
 
 class BetaNetwork(nn.Module):
-    def __init__(self, data, lr=1.0e-4, device=torch.device('cuda'), data_size = 500):
+    def __init__(self, data, device=torch.device('cuda'), data_size = 500):
         super(BetaNetwork, self).__init__()
-        self.obs_dim = data['obs'].shape[-1]
-        self.act_dim = data['action'].shape[-1]
 
         act_data = np.concatenate((data['action'], data['action_2']), axis=0)
         obs_data = np.concatenate((data['obs'], data['obs_2']), axis=0)
@@ -340,11 +340,12 @@ class BetaNetwork(nn.Module):
         act_data = torch.from_numpy(act_data).float().to(device)
         obs_data = torch.from_numpy(obs_data).float().to(device)
         self.votes_data = torch.from_numpy(votes_data).to(device)
-        self.lr = lr
+        self.lr = None
         self.device = device
+        self.data = torch.concat((obs_data, act_data), dim=-1)
 
         class BetaModel(nn.Module):
-            def __init__(self, act_data, obs_data, device=torch.device('cuda')):
+            def __init__(self, obs_data, act_data, device=torch.device('cuda')):
                 super(BetaModel, self).__init__()
 
                 self.enc_model = TransformerEncModel(
@@ -355,33 +356,14 @@ class BetaNetwork(nn.Module):
                     device = device
                 ).to(device)
 
-                # self.enc_model = nn.Identity().to(device)
-
-                # self.comp_model = NormalComparisonModel(
-                #     input_dim = 256,
-                #     dense_units= 256,
-                #     dropout_rate= 0.3,
-                #     device = device
-                # ).to(device)
-
                 self.comp_model = AttentionComparisonModel(
                     input_dim = 256, 
-                    dense_units = 256, 
                     dropout_rate = 0.3,
-                    nhead = 4,
+                    nhead = 16,
                     device = device
                 ).to(device)
 
-                # self.comp_model = TransformerComparisonModel(
-                #     input_dim = 69,
-                #     dense_units = 128,
-                #     nhead = 3,
-                #     num_layers = 4,
-                #     dropout_rate = 0.3,
-                #     device = device
-                # ).to(device)
-
-                self.data = torch.concat((act_data, obs_data), dim=-1)
+                self.data = torch.concat((obs_data, act_data), dim=-1)
 
             def forward(self, x):
                 batch_f = self.enc_model(x)
@@ -392,81 +374,148 @@ class BetaNetwork(nn.Module):
                 batch_f = (batch_f - bias) / std
                 output = self.comp_model(batch_f, all_data_f)
                 return output
+            
+            def one_to_one_forward(self, x, y):
+                x_f = self.enc_model(x)
+                y_f = self.enc_model(y)
+                all_data_f = self.enc_model(self.data)
+                bias = all_data_f.mean()
+                std = all_data_f.std()
+                x_f = (x_f - bias) / std
+                y_f = (y_f - bias) / std
+                output = self.comp_model.one_to_one_forward(x_f, y_f)
+                return output
+            
 
-        self.model = BetaModel(act_data, obs_data, device)
-        self.opt = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=5e-5) #, weight_decay=1.0e-4
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.opt, mode='min', patience=100, verbose=True) #patience=100, verbose=True
+        self.model = BetaModel(obs_data, act_data, device)
+        self.opt = None #, weight_decay=1.0e-4
+        self.scheduler = None #torch.optim.lr_scheduler.ReduceLROnPlateau(self.opt, mode='min', patience=100, verbose=True)
+        self.ref_model: BetaModel
 
     def get_alpha_beta(self, x):
         batch_comp = self.model(x).detach()
         alpha = torch.sum(2 * torch.clamp(batch_comp - 0.5, min=0), dim=-1)
         beta = torch.sum(2 * torch.clamp(0.5 - batch_comp, min=0), dim=-1)
-        # alpha, beta = self.model(x)
+        # alpha = torch.sum(torch.where(batch_comp > 0.5, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device)), dim=-1)
+        # beta = torch.sum(torch.where(batch_comp < 0.5, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device)), dim=-1)
+
         return alpha.detach(), beta.detach()
 
-    def fit_data(self, dataset, save_dir=None, load_dir=None, num_epochs=1, warm_up_epochs=0, batch_size=1):
+    def fit_data(self, save_dir=None, load_dir=None, num_epochs=1, warm_up_epochs=0, batch_size=1, lr=1.0e-5):
         if load_dir is None:
-            interval = math.ceil(dataset["obs"].shape[0] / batch_size)
+            interval = math.ceil(self.data.shape[0] / batch_size)
+            total_steps = num_epochs * interval
+            warm_up_steps = warm_up_epochs * interval
+            main_steps = total_steps - warm_up_steps
+
+            # Learning rate schedulers
+            self.lr = lr
+            self.opt = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
+            warm_up_scheduler = LinearLR(self.opt, start_factor=1e-8, end_factor=1.0, total_iters=warm_up_steps)
+            cosine_scheduler = CosineAnnealingLR(self.opt, T_max=main_steps)
+            self.scheduler = SequentialLR(self.opt, schedulers=[warm_up_scheduler, cosine_scheduler], milestones=[warm_up_steps])
+
             for epoch in range(num_epochs):
-
-                if epoch < warm_up_epochs:
-                    warm_up_lr = self.lr * (epoch + 1) / warm_up_epochs  # 线性增加学习率
-                    for param_group in self.opt.param_groups:
-                        param_group['lr'] = warm_up_lr
-
                 beta_loss_all = []
 
-                batch_shuffled_idx = np.random.permutation(dataset["obs"].shape[0])
+                batch_shuffled_idx = np.random.permutation(self.data.shape[0])
                 for i in tqdm(range(interval)):
 
                     start_pt = i * batch_size
-                    end_pt = min((i + 1) * batch_size, dataset["obs"].shape[0])
-                    batch = index_batch(dataset, batch_shuffled_idx[start_pt:end_pt])
+                    end_pt = min((i + 1) * batch_size, self.data.shape[0])
+                    local_idx = batch_shuffled_idx[start_pt:end_pt]
+                    batch = self.data[local_idx, ...]
+                    batch_votes = self.votes_data[local_idx, ...]
 
-                    # get batch
-                    obs_1 = batch['obs']  # batch_size * traj_len * obs_dim
-                    act_1 = batch['action']  # batch_size * traj_len * action_dim
-                    obs_2 = batch['obs_2']
-                    act_2 = batch['action_2']
-                    votes_1 = batch['votes']
-                    votes_2 = batch['votes_2']
-                    votes_1 = torch.from_numpy(votes_1).to(self.device)  # Shape: (N1, feature_dim)
-                    votes_2 = torch.from_numpy(votes_2).to(self.device)  # Shape: (N2, feature_dim)
-                    s_a_1 = np.concatenate([obs_1, act_1], axis=-1)
-                    s_a_2 = np.concatenate([obs_2, act_2], axis=-1)
+                    comp = torch.sigmoid(batch_votes - self.votes_data.T)
+                    pred_comp = self.model(batch)
 
-                    comp_1 = torch.sigmoid(votes_1 - self.votes_data.T)  # Shape: (N_1, N_2)
-                    comp_2 = torch.sigmoid(votes_2 - self.votes_data.T)  # Shape: (N_1, N_2)
-
-                    # comp_1 = comp_1.squeeze(-1)  # Shape: (N1, M)
-                    # comp_2 = comp_2.squeeze(-1)  # Shape: (N2, M)
-
-                    pred_comp_1 = self.model(torch.from_numpy(s_a_1).float().to(self.device))
-                    pred_comp_2 = self.model(torch.from_numpy(s_a_2).float().to(self.device))
-
-                    beta_loss = torch.sum((pred_comp_1 - comp_1) ** 2) + torch.sum((pred_comp_2 - comp_2) ** 2)
+                    beta_loss = torch.mean((comp - pred_comp) ** 2)
 
                     beta_loss_all.append(beta_loss)
 
                     self.opt.zero_grad()
                     beta_loss.backward()
                     self.opt.step()
-
-                # Scheduler step
-                avg_loss = torch.stack(beta_loss_all).mean().item()
-                self.scheduler.step(avg_loss)
+                    self.scheduler.step()  # Update LR after each optimizer step
 
                 beta_loss_all = torch.stack(beta_loss_all, dim=0)
                 print("iteration:", epoch + 1)
                 print("mean_beta_loss_all:", torch.mean(beta_loss_all).item())
 
-                if save_dir is not None and (((epoch+1) % 50 == 0) or ((epoch+1) == num_epochs)):
-                    tmp_save_dir= Path(save_dir) / f'itr_{epoch+1}'
+                if save_dir is not None and (((epoch + 1) % 50 == 0) or ((epoch + 1) == num_epochs)):
+                    tmp_save_dir = Path(save_dir) / f'itr_{epoch + 1}'
                     tmp_save_dir.mkdir(parents=True, exist_ok=True)
                     model_file = tmp_save_dir / 'beta_model.pth'
                     self.save_model(model_file)
+            self.ref_model = copy.deepcopy(self.model)
         else:
             self.load_model(load_dir)
+            self.ref_model = copy.deepcopy(self.model)
+
+    def online_update(self, dataset, num_epochs=1, warm_up_epochs=0, batch_size=1, lr = 1.0e-6):
+        interval = math.ceil(dataset["obs"].shape[0] / batch_size)
+        total_steps = num_epochs * interval
+        warm_up_steps = warm_up_epochs * interval
+        main_steps = total_steps - warm_up_steps
+
+        # Learning rate schedulers
+        self.lr = lr
+        self.opt = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
+        warm_up_scheduler = LinearLR(self.opt, start_factor=1e-8, end_factor=1.0, total_iters=warm_up_steps)
+        cosine_scheduler = CosineAnnealingLR(self.opt, T_max=main_steps)
+        self.scheduler = SequentialLR(self.opt, schedulers=[warm_up_scheduler, cosine_scheduler], milestones=[warm_up_steps])
+
+        for epoch in range(num_epochs):
+            beta_loss_all = []
+
+            batch_shuffled_idx = np.random.permutation(dataset["obs"].shape[0])
+            for i in tqdm(range(interval)):
+
+                start_pt = i * batch_size
+                end_pt = min((i + 1) * batch_size, dataset["obs"].shape[0])
+                batch = index_batch(dataset, batch_shuffled_idx[start_pt:end_pt])
+
+                obs_1 = batch['obs']  # batch_size * traj_len * obs_dim
+                act_1 = batch['action']  # batch_size * traj_len * action_dim
+                obs_2 = batch['obs_2']
+                act_2 = batch['action_2']
+                s_a_1 = np.concatenate([obs_1, act_1], axis=-1)
+                s_a_2 = np.concatenate([obs_2, act_2], axis=-1)
+
+                votes_1 = torch.from_numpy(batch['votes']).to(self.device)
+                votes_2 = torch.from_numpy(batch['votes_2']).to(self.device)
+
+                # threshold = 1e-3
+                # diff = torch.abs(votes_1 - votes_2)
+                # condition_1 = (votes_1 > votes_2) & (diff >= threshold)  # votes_1 > votes_2 and diff >= threshold
+                # condition_2 = (votes_1 < votes_2) & (diff >= threshold)  # votes_1 < votes_2 and diff >= threshold
+
+                # comp_1 = torch.where(condition_1, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device))
+                # comp_1 = torch.squeeze(comp_1, dim=-1)
+                # comp_2 = torch.where(condition_2, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device))
+                # comp_2 = torch.squeeze(comp_2, dim=-1)
+
+                comp_1 = torch.sigmoid(votes_1 - votes_2)
+                comp_2 = torch.sigmoid(votes_2 - votes_1)
+
+                pred_comp_1 = self.model.one_to_one_forward(torch.from_numpy(s_a_1).float().to(self.device), torch.from_numpy(s_a_2).float().to(self.device))
+                pred_comp_2 = self.model.one_to_one_forward(torch.from_numpy(s_a_2).float().to(self.device), torch.from_numpy(s_a_1).float().to(self.device))
+                # ref_comp_1 = self.ref_model.one_to_one_forward(torch.from_numpy(s_a_1).float().to(self.device), torch.from_numpy(s_a_2).float().to(self.device)).detach()
+                # ref_comp_2 = self.ref_model.one_to_one_forward(torch.from_numpy(s_a_2).float().to(self.device), torch.from_numpy(s_a_1).float().to(self.device)).detach()
+
+                beta_loss = (torch.mean((comp_1 - pred_comp_1) ** 2) + torch.mean((comp_2 - pred_comp_2) ** 2)) / 2
+
+                beta_loss_all.append(beta_loss)
+
+                self.opt.zero_grad()
+                beta_loss.backward()
+                self.opt.step()
+                self.scheduler.step()  # Update LR after each optimizer step
+
+            beta_loss_all = torch.stack(beta_loss_all, dim=0)
+            print("iteration:", epoch + 1)
+            print("mean_beta_loss_all:", torch.mean(beta_loss_all).item())
 
     def save_model(self, filepath):
         torch.save(self.state_dict(), filepath)

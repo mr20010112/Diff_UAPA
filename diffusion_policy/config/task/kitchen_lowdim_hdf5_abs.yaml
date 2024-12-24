@@ -65,5 +65,6 @@ pref_dataset:
   val_ratio: 0.2
   N: 1000
   gamma: ${gamma}
+  gpu_device: ${training.device_gpu}
   save_dir: data/pref_data/kitchen
   # load_dir: data/pref_data/kitchen/kitchen_prefdata.h5

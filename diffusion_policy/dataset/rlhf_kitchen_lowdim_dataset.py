@@ -36,6 +36,7 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
                 val_ratio=0.0,
                 load_dir=None,
                 save_dir=None,
+                gpu_device = None,
                 ):
         super().__init__()
 
@@ -103,9 +104,6 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
                     #     votes = np.array([0.0])
                     #     votes_2 = np.array([1.0])
 
-                # votes = np.ones((1,))
-                # votes_2 = np.zeros((1,))
-
 
                 # Add preference episode to the replay buffer
                 self.pref_replay_buffer.add_pref_episode(
@@ -137,21 +135,16 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
                 def recursively_store(group, data):
 
                     for key, value in data.items():
-                        # 确保键名合法（HDF5 不支持某些特殊字符）
-                        sanitized_key = key.replace('/', '_')  # 替换不合法字符
+                        sanitized_key = key.replace('/', '_')
 
                         if isinstance(value, dict):
-                            # 如果值是字典，则创建子组并递归存储
                             subgroup = group.create_group(sanitized_key)
                             recursively_store(subgroup, value)
                         elif isinstance(value, str):
-                            # 如果值是字符串，保存为字节类型
                             group.create_dataset(sanitized_key, data=value.encode('utf-8'))
                         elif hasattr(value, "dtype") and value.dtype == 'O':
-                            # 如果是对象类型数组，转为字符串数组
                             group.create_dataset(sanitized_key, data=[str(v) for v in value])
                         else:
-                            # 其他情况，直接保存
                             group.create_dataset(sanitized_key, data=value)
 
                 with h5py.File(save_dir / 'kitchen_prefdata.h5', 'w') as f:
@@ -204,9 +197,11 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
             episode_mask=train_mask,
         )
 
+        self.gpu_device = gpu_device
         self.length = N
         self.train_mask = train_mask
         self.sequence_length = sequence_length
+        self.beta_model: Optional[BetaNetwork] = None
 
 
     # def get_normalizer(self, mode='limits', **kwargs):
@@ -227,90 +222,46 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
             del pref_data['episode_ends']
 
         device = 'cuda:1'
-        beta_model = BetaNetwork(data=pref_data, lr=1.0e-5, device=device,
-                 data_size=150)
+        self.beta_model = BetaNetwork(data=pref_data,
+                                 device=self.gpu_device,
+                                 data_size=100)
 
-        batch_size = 6
+        batch_size = 5
 
-        beta_model.fit_data(num_epochs=20, warm_up_epochs=4, batch_size=batch_size, dataset=pref_data, save_dir='data/beta_model/kitchen', 
-        load_dir='data/beta_model/kitchen/saved/beta_model.pth') 
+        # beta_model.fit_data(num_epochs=30, warm_up_epochs=6, batch_size=batch_size, lr=1.0e-5, save_dir='data/beta_model/kitchen')
+        self.beta_model.online_update(dataset=pref_data, num_epochs=10, warm_up_epochs=0, batch_size=batch_size, lr=1.0e-06)
+        #,load_dir='data/beta_model/kitchen/saved/beta_model.pth') 
         
-        obs_1 = data['obs']
-        obs_2 = data['obs_2']
-        action_1 = data['action']
-        action_2 = data['action_2']
-        s_a_1 = np.concatenate([obs_1, action_1], axis=-1)
-        s_a_2 = np.concatenate([obs_2, action_2], axis=-1)
+        self.update_beta_priori(batch_size=batch_size)
 
-        interval = math.ceil(s_a_1.shape[0] / batch_size)
-        alpha, beta = [], []
-        alpha_2, beta_2 = [], []
+        alpha, beta = self.pref_replay_buffer.meta['beta_priori'][:, 0], self.pref_replay_buffer.meta['beta_priori'][:, 1]
+        alpha_2, beta_2 = self.pref_replay_buffer.meta['beta_priori_2'][:, 0], self.pref_replay_buffer.meta['beta_priori_2'][:, 1]
 
-        for i in range(interval):
-            start_pt = i * batch_size
-            end_pt = min((i + 1) * batch_size, s_a_1.shape[0])
-            batch_s_a_1 = s_a_1[start_pt:end_pt, ...]
-            batch_s_a_2 = s_a_2[start_pt:end_pt, ...]
+        scores_1 = alpha - beta
+        scores_2 = alpha_2 - beta_2
+        scores = np.concatenate((scores_1, scores_2), axis = 0)
+        scores = (scores - scores.min()) / (scores.max() - scores.min())
 
-            batch_alpha, batch_beta = beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_1).float().to(device))
-            batch_alpha_2, batch_beta_2 = beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_2).float().to(device))
+        votes_1 = meta['votes']
+        votes_2 = meta['votes_2']
+        votes = np.concatenate((votes_1, votes_2), axis = 0)
+        votes = np.clip(votes, 0, (votes.mean() + 3 * votes.std()))
+        votes = (votes - votes.min()) / (votes.max() - votes.min())
 
-            alpha.append(batch_alpha)
-            beta.append(batch_beta)
-            alpha_2.append(batch_alpha_2)
-            beta_2.append(batch_beta_2)
+        error = (np.abs(scores - votes)).mean()
+        print(f'Prediction error: {error}')
 
-        alpha = torch.cat(alpha, dim=0)+1
-        beta = torch.cat(beta, dim=0)+1
-        alpha_2 = torch.cat(alpha_2, dim=0)+1
-        beta_2 = torch.cat(beta_2, dim=0)+1
+    def update_beta_priori(self, batch_size=3):
 
-        mean_value = torch.mean(torch.cat([alpha, beta, alpha_2, beta_2]))
-        std_value = torch.std(torch.cat([alpha, beta, alpha_2, beta_2]))
+        def scale_to_range(x, min_val, max_val, target_min=1, target_max=10):
 
-        alpha = torch.clamp(alpha, max=mean_value+3*std_value)
-        beta = torch.clamp(beta, max=mean_value+3*std_value)
-        alpha_2 = torch.clamp(alpha_2, max=mean_value+3*std_value)
-        beta_2 = torch.clamp(beta_2, max=mean_value+3*std_value)
-
-        # 计算所有张量的全局最大值和最小值
-        max_value = torch.max(torch.cat([alpha, beta, alpha_2, beta_2]))
-        min_value = torch.min(torch.cat([alpha, beta, alpha_2, beta_2]))
-
-        # Define the scaling function
-        def scale_to_range(x, min_val, max_val, target_min=1, target_max=25):
-            """
-            Scale tensor x to the target range [target_min, target_max].
-
-            Parameters:
-                x (torch.Tensor): Input tensor to be scaled.
-                min_val (float): Minimum value of the input range.
-                max_val (float): Maximum value of the input range.
-                target_min (float): Minimum value of the target range.
-                target_max (float): Maximum value of the target range.
-
-            Returns:
-                torch.Tensor: Scaled tensor.
-            """
             if min_val == max_val:
                 raise ValueError("min_val and max_val must be different to avoid division by zero.")
             return target_min + (x - min_val) * (target_max - target_min) / (max_val - min_val)
 
         # Define unified scaling logic
-        def scale_tensor(x, global_min, global_max, target_min=1, target_max=25):
-            """
-            Scale tensor x based on global minimum and maximum, applying proportional adjustment.
+        def scale_tensor(x, global_min, global_max, target_min=1, target_max=10):
 
-            Parameters:
-                x (torch.Tensor): Input tensor to be scaled.
-                global_min (float): Global minimum value for proportional scaling.
-                global_max (float): Global maximum value for proportional scaling.
-                target_min (float): Minimum value of the target range.
-                target_max (float): Maximum value of the target range.
-
-            Returns:
-                torch.Tensor: Scaled tensor.
-            """
             # Ensure the tensor is a floating-point tensor
             if not torch.is_floating_point(x):
                 x = x.float()
@@ -334,29 +285,52 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
             # Apply scaling
             return scale_to_range(x, local_min, local_max, scaled_min, scaled_max)
 
-        # 设置目标范围
+        obs_1 = self.pref_replay_buffer.data['obs']
+        obs_2 = self.pref_replay_buffer.data['obs_2']
+        action_1 = self.pref_replay_buffer.data['action']
+        action_2 = self.pref_replay_buffer.data['action_2']
+        s_a_1 = np.concatenate([obs_1, action_1], axis=-1)
+        s_a_2 = np.concatenate([obs_2, action_2], axis=-1)
+
+        interval = math.ceil(s_a_1.shape[0] / batch_size)
+        alpha, beta = [], []
+        alpha_2, beta_2 = [], []
+        for i in range(interval):
+            start_pt = i * batch_size
+            end_pt = min((i + 1) * batch_size, s_a_1.shape[0])
+            batch_s_a_1 = s_a_1[start_pt:end_pt, ...]
+            batch_s_a_2 = s_a_2[start_pt:end_pt, ...]
+
+            batch_alpha, batch_beta = self.beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_1).float().to(self.beta_model.device))
+            batch_alpha_2, batch_beta_2 = self.beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_2).float().to(self.beta_model.device))
+
+            alpha.append(batch_alpha)
+            beta.append(batch_beta)
+            alpha_2.append(batch_alpha_2)
+            beta_2.append(batch_beta_2)
+
+        alpha = torch.cat(alpha, dim=0)+1
+        beta = torch.cat(beta, dim=0)+1
+        alpha_2 = torch.cat(alpha_2, dim=0)+1
+        beta_2 = torch.cat(beta_2, dim=0)+1
+
+        mean_value = torch.mean(torch.cat([alpha, beta, alpha_2, beta_2]))
+        std_value = torch.std(torch.cat([alpha, beta, alpha_2, beta_2]))
+
+        alpha = torch.clamp(alpha, max=mean_value+3*std_value)
+        beta = torch.clamp(beta, max=mean_value+3*std_value)
+        alpha_2 = torch.clamp(alpha_2, max=mean_value+3*std_value)
+        beta_2 = torch.clamp(beta_2, max=mean_value+3*std_value)
+
+        max_value = torch.max(torch.cat([alpha, beta, alpha_2, beta_2]))
+        min_value = torch.min(torch.cat([alpha, beta, alpha_2, beta_2]))
+
         target_min, target_max = 1, 10
 
-        # 按全局和局部范围缩放张量
         alpha = scale_tensor(alpha, min_value, max_value, target_min, target_max)
         beta = scale_tensor(beta, min_value, max_value, target_min, target_max)
         alpha_2 = scale_tensor(alpha_2, min_value, max_value, target_min, target_max)
         beta_2 = scale_tensor(beta_2, min_value, max_value, target_min, target_max)
-
-        scores_1 = alpha - beta
-        scores_2 = alpha_2 - beta_2
-        scores = torch.cat([scores_1, scores_2], dim = 0)
-        scores = (scores - scores.min()) / (scores.max() - scores.min())
-
-        votes_1 = torch.from_numpy(meta['votes'])
-        votes_2 = torch.from_numpy(meta['votes_2'])
-        votes = torch.cat([votes_1, votes_2], dim = 0)
-        votes = votes.squeeze(dim = 1)
-        votes = votes.to(device=scores.device)
-        votes = torch.clamp(votes, min=0, max=(votes.mean() + 3 * votes.std()).item())
-        votes = (votes - votes.min()) / (votes.max() - votes.min())
-
-        error = torch.mean(torch.abs(scores - votes))
 
         self.pref_replay_buffer.meta['beta_priori'] = np.array([alpha.cpu().numpy(), beta.cpu().numpy()]).T
         self.pref_replay_buffer.meta['beta_priori_2'] = np.array([alpha_2.cpu().numpy(), beta_2.cpu().numpy()]).T
