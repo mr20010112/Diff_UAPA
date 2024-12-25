@@ -62,7 +62,7 @@ normal_dataset:
 pref_dataset:
   _target_: diffusion_policy.dataset.rlhf_kitchen_lowdim_dataset.RLHF_KitchenLowdimDataset
   sequence_length: 280
-  val_ratio: 0.2
+  val_ratio: 0
   N: 1000
   gamma: ${gamma}
   gpu_device: ${training.device_gpu}

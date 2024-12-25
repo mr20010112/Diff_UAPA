@@ -153,57 +153,6 @@ class NormalComparisonModel(nn.Module):
         output = output.view(N1, N2)  # Reshape to (N1, N2)
         return output
 
-class TransformerComparisonModel(nn.Module):
-    def __init__(self, input_dim, dense_units, nhead, num_layers, dropout_rate, device):
-        super(TransformerComparisonModel, self).__init__()
-        
-        # Transformer Layer (for interaction modeling)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=input_dim, nhead=nhead, dropout=dropout_rate, batch_first=True)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        
-        # Fully connected layers for classification
-        self.fc1 = nn.Linear(2 * input_dim, dense_units)
-        self.dropout = nn.Dropout(dropout_rate)
-        self.fc2 = nn.Linear(dense_units, dense_units // 2)
-        self.output = nn.Linear(dense_units // 2, 1)
-        
-        # Device setup
-        self.device = device
-        self.to(device)
-
-    def forward(self, f1, f2):
-        f1, f2 = f1.to(self.device), f2.to(self.device)
-        
-        # Shape of f1: (N1, L1, D), f2: (N2, L2, D)
-        N1, L1, D = f1.shape
-        N2, L2, _ = f2.shape
-
-        # Expand dimensions for pairwise comparison
-        f1_expanded = f1.unsqueeze(1).expand(N1, N2, L1, D)  # Shape: (N1, N2, L1, D)
-        f2_expanded = f2.unsqueeze(0).expand(N1, N2, L2, D)  # Shape: (N1, N2, L2, D)
-        
-        # Flatten for processing through Transformer
-        f1_flat = f1_expanded.reshape(-1, L1, D)  # Shape: (N1*N2, L1, D)
-        f2_flat = f2_expanded.reshape(-1, L2, D)  # Shape: (N1*N2, L2, D)
-
-        # Cross-sequence attention using Transformer Encoder
-        conmbined_sequence = torch.cat([f1_flat, f2_flat], dim=1)  # Shape: (N1*N2, L1+L2, D)
-        attended_features = self.transformer_encoder(conmbined_sequence)  # Shape: (N1*N2, L1, D)
-
-        # Sequence pooling: Reduce sequence dimension
-        attended_pooled = attended_features.mean(dim=1)  # Shape: (N1*N2, D)
-
-        # Fully connected layers
-        x = F.gelu(self.fc1(attended_pooled))  # Shape: (N1*N2, dense_units)
-        x = self.dropout(x)
-        x = F.gelu(self.fc2(x))  # Shape: (N1*N2, dense_units // 2)
-        x = self.output(x)  # Shape: (N1*N2, 1)
-        
-        # Sigmoid activation for [0, 1] output
-        output = torch.sigmoid(x).squeeze(-1)  # Shape: (N1*N2)
-        output = output.view(N1, N2)  # Reshape to (N1, N2)
-        return output
-
 class AttentionComparisonModel(nn.Module):
     def __init__(self, input_dim, dropout_rate, nhead, device):
         super(AttentionComparisonModel, self).__init__()

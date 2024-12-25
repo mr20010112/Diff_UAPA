@@ -20,6 +20,7 @@ import tqdm
 import numpy as np
 import shutil
 import matplotlib.pyplot as plt
+from scipy.stats import beta
 
 from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
@@ -112,36 +113,70 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         pref_dataset: BaseLowdimDataset
         pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, expert_replay_buffer=expert_dataset.replay_buffer, \
                                                normal_replay_buffer=normal_dataset.replay_buffer) #cfg.task.perf_dataset
-        pref_dataset.get_beta_priori()
         
         # cut online groups
+        all_votes_1, all_votes_2 = np.array([]), np.array([])
         votes_1, votes_2 = pref_dataset.pref_replay_buffer.meta['votes'], pref_dataset.pref_replay_buffer.meta['votes_2']
-        votes_1, votes_2 = votes_1 / (votes_1 + votes_2) * cfg.training.all_votes, votes_2 / (votes_1 + votes_2) * cfg.training.all_votes
+        ratio_alpha, ratio_beta = votes_1 / (votes_1 + votes_2), votes_2 / (votes_1 + votes_2)
+        votes_alpha = np.maximum(ratio_alpha*10, 1e-6)  # 将小于等于 0 的值替换为一个小正数
+        votes_beta = np.maximum(ratio_beta*10, 1e-6)
 
-        
-        
-        train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
+        for local_epoch_idx in range(cfg.training.online.num_groups):
+            ratio = np.stack([np.random.beta(votes_alpha[i], votes_beta[i]) for i in range(votes_alpha.shape[0])])
+            local_votes_1 = np.round(cfg.training.online.all_votes / cfg.training.online.num_groups * ratio)
+            local_votes_2 = np.round(cfg.training.online.all_votes / cfg.training.online.num_groups - local_votes_1)
+
+            if local_epoch_idx == 0:
+                all_votes_1 = local_votes_1.T
+                all_votes_2 = local_votes_2.T
+            else:
+                all_votes_1 = np.concatenate((all_votes_1, local_votes_1.T), axis=0)
+                all_votes_2 = np.concatenate((all_votes_2, local_votes_2.T), axis=0)
+
+
+        sum_votes_1, sum_votes_2 = np.sum(all_votes_1, axis=0, keepdims=True), np.sum(all_votes_2, axis=0, keepdims=True)
+        sum_votes_1, sum_votes_2 = np.maximum(sum_votes_1, 1), np.maximum(sum_votes_2, 1)
+        all_votes_1, all_votes_2 = np.round(all_votes_1 / sum_votes_1 * (ratio_alpha.T * cfg.training.online.all_votes)), \
+                                    np.round(all_votes_2 / sum_votes_2 * (ratio_beta.T * cfg.training.online.all_votes))
+
+        # add noise to votes
+        for local_epoch_idx in range(cfg.training.online.num_groups):
+            if local_epoch_idx % cfg.training.online.reverse_freq == 0:
+                # delta = np.round(cfg.training.online.all_votes / cfg.training.online.num_groups * cfg.training.online.reverse_rate)
+                noise = np.random.normal(loc=0, scale=cfg.training.online.all_votes / cfg.training.online.num_groups * cfg.training.online.reverse_rate / 2 \
+                                         , size=all_votes_1[local_epoch_idx].shape)
+                condiction = (all_votes_1[local_epoch_idx] > all_votes_2[local_epoch_idx])
+                all_votes_1[local_epoch_idx][condiction] -= np.round(np.abs(noise))[condiction]
+                all_votes_2[local_epoch_idx][condiction] += np.round(np.abs(noise))[condiction]
+                all_votes_1[local_epoch_idx][~condiction] += np.round(np.abs(noise))[~condiction]
+                all_votes_2[local_epoch_idx][~condiction] -= np.round(np.abs(noise))[~condiction]
+                
+
+                all_votes_1[local_epoch_idx] = np.maximum(all_votes_1[local_epoch_idx], 0)
+                all_votes_2[local_epoch_idx] = np.maximum(all_votes_2[local_epoch_idx], 0)
+    
+        init_votes_1 = np.sum(all_votes_1, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
+        init_votes_2 = np.sum(all_votes_2, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
+        # contains_nan_1 = np.isnan(init_votes_1).any()
+        # contains_nan_2 = np.isnan(init_votes_2).any()
+        # print(contains_nan_1, contains_nan_2)
+        pref_dataset.pref_replay_buffer.meta['votes'] = init_votes_1
+        pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2
+
+        pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1
+        pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2
+
+        pref_dataset.set_beta_priori()
+        pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=2, batch_size=5, lr=1.0e-6)
+        pref_dataset.update_beta_priori()
+
+        # train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset, expert_dataset, normal_dataset
 
         self.model.set_normalizer(normalizer)
         if cfg.training.use_ema:
             # self.ema_model.double()
             self.ema_model.set_normalizer(normalizer)
-
-        # configure lr scheduler
-        lr_scheduler = get_scheduler(
-            cfg.training.lr_scheduler,
-            optimizer=self.optimizer,
-            num_warmup_steps=cfg.training.lr_warmup_steps,
-            num_training_steps=(
-                len(train_dataloader) * cfg.training.num_epochs) \
-                    // cfg.training.gradient_accumulate_every,
-            # # pytorch assumes stepping LRScheduler every epoch
-            # # however huggingface diffusers steps it every batch
-            # lr_end=cfg.training.lr_end,
-            # num_cycles=cfg.training.num_cycles,
-            last_epoch=self.global_step-1,
-        )
 
         # configure ema
         ema: EMAModel = None
@@ -200,13 +235,23 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         device = torch.device(cfg.training.device_gpu)
         log_path = os.path.join(self.output_dir, 'logs.json.txt')
         with JsonLogger(log_path) as json_logger:
-            for online_epoch_idx in range(cfg.training.num_groups):
+            for online_epoch_idx in range(cfg.training.online.num_groups):
+                print(f"Round {online_epoch_idx + 1} of {cfg.training.online.num_groups} for online training")
+
+                ref_model = copy.deepcopy(self.model.model)
+
+                local_votes_1 = np.array(all_votes_1[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
+                local_votes_2 = np.array(all_votes_2[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
+
+                pref_dataset.pref_replay_buffer.meta['votes'] = local_votes_1
+                pref_dataset.pref_replay_buffer.meta['votes_2'] = local_votes_2
+
+                pref_dataset.pref_replay_buffer.root['meta']['votes'] = local_votes_1
+                pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = local_votes_2
 
                 train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
 
                 self.optimizer = self.model.get_optimizer(**cfg.optimizer)
-                self.global_step = 0
-                self.epoch = 0
 
                 lr_scheduler = get_scheduler(
                     cfg.training.lr_scheduler,
@@ -215,7 +260,7 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                     num_training_steps=(
                         len(train_dataloader) * cfg.training.num_epochs) \
                             // cfg.training.gradient_accumulate_every,
-                    last_epoch=self.global_step-1,
+                    last_epoch=-1,
                 )
 
                 for local_epoch_idx in range(cfg.training.num_epochs):
@@ -267,99 +312,99 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                                 'lr': lr_scheduler.get_last_lr()[0]
                             }
 
-                            is_last_batch = (batch_idx == (len(train_dataloader)-1))
-                            if not is_last_batch:
-                                # log of last step is combined with validation and rollout
-                                wandb_run.log(step_log, step=self.global_step)
-                                json_logger.log(step_log)
-                                self.global_step += 1
+                            # is_last_batch = (batch_idx == (len(train_dataloader)-1))
+                            # if not is_last_batch:
+                            #     # log of last step is combined with validation and rollout
+                            wandb_run.log(step_log, step=self.global_step)
+                            json_logger.log(step_log)
+                            self.global_step += 1
 
                             if (cfg.training.max_train_steps is not None) \
                                 and batch_idx >= (cfg.training.max_train_steps-1):
                                 break
 
-                # at the end of each epoch
-                # replace train_loss with epoch average
-                train_loss = np.mean(train_losses)
-                step_log['train_loss'] = train_loss
+                    # at the end of each epoch
+                    # replace train_loss with epoch average
+                    train_loss = np.mean(train_losses)
+                    step_log['train_loss'] = train_loss
 
-                # ========= eval for this epoch ==========
-                policy = self.model
-                if cfg.training.use_ema:
-                    policy = self.ema_model
-                policy.eval()
+                    # ========= eval for this epoch ==========
+                    policy = self.model
+                    if cfg.training.use_ema:
+                        policy = self.ema_model
+                    policy.eval()
 
-                # run rollout
-                if (self.epoch % cfg.training.rollout_every) == 0:
-                    runner_log = env_runner.run(policy)
-                    # log all
-                    step_log.update(runner_log)
+                    # run rollout
+                    if (self.epoch % cfg.training.rollout_every) == 0:
+                        runner_log = env_runner.run(policy)
+                        # log all
+                        step_log.update(runner_log)
 
-                # run diffusion sampling on a training batch
-                if (self.epoch % cfg.training.sample_every) == 0:
-                    with torch.no_grad():
-                        # sample trajectory from training set, and evaluate difference
-                        batch = dict_apply(train_sampling_batch, lambda x: x.to(device, non_blocking=True))
-                        get_obs = batch["obs"]
-                        gt_action = batch["action"]
+                    # run diffusion sampling on a training batch
+                    if (self.epoch % cfg.training.sample_every) == 0:
+                        with torch.no_grad():
+                            # sample trajectory from training set, and evaluate difference
+                            batch = dict_apply(train_sampling_batch, lambda x: x.to(device, non_blocking=True))
+                            get_obs = batch["obs"]
+                            gt_action = batch["action"]
+                            
+                            
+                            start_idx = np.random.randint(0, gt_action.shape[1] - self.model.horizon + 1)
+                            end_idx = start_idx + self.model.horizon
+
+                            get_obs = get_obs[:, start_idx:end_idx, :]
+                            gt_action = gt_action[:, start_idx:end_idx, :]
+                            obs_dict = {'obs': get_obs}
+
+                            result = policy.predict_action(obs_dict)
+                            if cfg.pred_action_steps_only:
+                                pred_action = result['action']
+                                start = cfg.n_obs_steps - 1
+                                end = start + cfg.n_action_steps
+                                gt_action = gt_action[:,start:end]
+                            else:
+                                pred_action = result['action_pred']
+                            pred_action = pred_action.to(gt_action.device, non_blocking=True)
+                            mse = torch.nn.functional.mse_loss(pred_action, gt_action)
+                            step_log['train_action_error'] = mse.item()
+                            del batch
+                            del obs_dict
+                            del gt_action
+                            del result
+                            del pred_action
+                            del mse
+
+                    # checkpoint
+                    if (self.epoch % cfg.training.checkpoint_every) == 0:
+                        # checkpointing
+                        if cfg.checkpoint.save_last_ckpt:
+                            self.save_checkpoint()
+                        if cfg.checkpoint.save_last_snapshot:
+                            self.save_snapshot()
+
+                        # sanitize metric names
+                        metric_dict = dict()
+                        for key, value in step_log.items():
+                            new_key = key.replace('/', '_')
+                            metric_dict[new_key] = value
                         
+                        # We can't copy the last checkpoint here
+                        # since save_checkpoint uses threads.
+                        # therefore at this point the file might have been empty!
                         
-                        start_idx = np.random.randint(0, gt_action.shape[1] - self.model.horizon + 1)
-                        end_idx = start_idx + self.model.horizon
+                        topk_ckpt_path = topk_manager.get_ckpt_path(metric_dict)
 
-                        get_obs = get_obs[:, start_idx:end_idx, :]
-                        gt_action = gt_action[:, start_idx:end_idx, :]
-                        obs_dict = {'obs': get_obs}
+                        if topk_ckpt_path is not None:
+                            self.save_checkpoint(path=topk_ckpt_path)
+                    # ========= eval end for this epoch ==========
+                    policy.train()
 
-                        result = policy.predict_action(obs_dict)
-                        if cfg.pred_action_steps_only:
-                            pred_action = result['action']
-                            start = cfg.n_obs_steps - 1
-                            end = start + cfg.n_action_steps
-                            gt_action = gt_action[:,start:end]
-                        else:
-                            pred_action = result['action_pred']
-                        pred_action = pred_action.to(gt_action.device, non_blocking=True)
-                        mse = torch.nn.functional.mse_loss(pred_action, gt_action)
-                        step_log['train_action_error'] = mse.item()
-                        del batch
-                        del obs_dict
-                        del gt_action
-                        del result
-                        del pred_action
-                        del mse
-
-                # checkpoint
-                if (self.epoch % cfg.training.checkpoint_every) == 0:
-                    # checkpointing
-                    if cfg.checkpoint.save_last_ckpt:
-                        self.save_checkpoint()
-                    if cfg.checkpoint.save_last_snapshot:
-                        self.save_snapshot()
-
-                    # sanitize metric names
-                    metric_dict = dict()
-                    for key, value in step_log.items():
-                        new_key = key.replace('/', '_')
-                        metric_dict[new_key] = value
-                    
-                    # We can't copy the last checkpoint here
-                    # since save_checkpoint uses threads.
-                    # therefore at this point the file might have been empty!
-                    
-                    topk_ckpt_path = topk_manager.get_ckpt_path(metric_dict)
-
-                    if topk_ckpt_path is not None:
-                        self.save_checkpoint(path=topk_ckpt_path)
-                # ========= eval end for this epoch ==========
-                policy.train()
-
-                # end of epoch
-                # log of last step is combined with validation and rollout
-                wandb_run.log(step_log, step=self.global_step)
-                json_logger.log(step_log)
-                self.global_step += 1
-                self.epoch += 1
+                    # end of epoch
+                    # log of last step is combined with validation and rollout
+                    wandb_run.log(step_log, step=self.global_step)
+                    json_logger.log(step_log)
+                    self.global_step += 1
+                    self.epoch += 1
 
 @hydra.main(
     version_base=None,

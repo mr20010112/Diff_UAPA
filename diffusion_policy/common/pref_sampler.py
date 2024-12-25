@@ -63,6 +63,12 @@ class PrefSequenceSampler:
         result = self.replay_buffer.get_pref_episode(indices[idx])
 
         for key in result:
-            result[key] = torch.from_numpy(result[key])
+            value = result[key]
+            if isinstance(value, np.ndarray):
+                result[key] = torch.from_numpy(value)
+            elif isinstance(value, (np.float32, np.float64, float, int)):
+                result[key] = torch.tensor(value, dtype=torch.float32)
+            else:
+                raise TypeError(f"Unsupported type {type(value)} for key '{key}'")
 
         return result

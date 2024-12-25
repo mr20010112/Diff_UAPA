@@ -112,7 +112,9 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         pref_dataset: BaseLowdimDataset
         pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, expert_replay_buffer=expert_dataset.replay_buffer, \
                                                normal_replay_buffer=normal_dataset.replay_buffer) #cfg.task.perf_dataset
-        pref_dataset.get_beta_priori()
+        pref_dataset.set_beta_priori()
+        pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=10, warm_up_epochs=2, batch_size=5, lr = 1.0e-6)
+
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset, expert_dataset, normal_dataset
 

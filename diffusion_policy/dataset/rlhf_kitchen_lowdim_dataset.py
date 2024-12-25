@@ -36,7 +36,7 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
                 val_ratio=0.0,
                 load_dir=None,
                 save_dir=None,
-                gpu_device = None,
+                gpu_device = 'cuda:0',
                 ):
         super().__init__()
 
@@ -212,8 +212,7 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
     #     normalizer = LinearNormalizer()
     #     normalizer.fit(data=self.replay_buffer.data, last_n_dims=1, mode=mode, **kwargs)
     #     return normalizer
-
-    def get_beta_priori(self):
+    def construct_pref_data(self):
         data = self.pref_replay_buffer.data
         pref_data = data.copy()
         meta = self.pref_replay_buffer.meta
@@ -221,35 +220,13 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
         if 'episode_ends' in pref_data.keys():
             del pref_data['episode_ends']
 
-        device = 'cuda:1'
+        return pref_data
+
+    def set_beta_priori(self):
+        pref_data = self.construct_pref_data()
         self.beta_model = BetaNetwork(data=pref_data,
                                  device=self.gpu_device,
                                  data_size=100)
-
-        batch_size = 5
-
-        # beta_model.fit_data(num_epochs=30, warm_up_epochs=6, batch_size=batch_size, lr=1.0e-5, save_dir='data/beta_model/kitchen')
-        self.beta_model.online_update(dataset=pref_data, num_epochs=10, warm_up_epochs=0, batch_size=batch_size, lr=1.0e-06)
-        #,load_dir='data/beta_model/kitchen/saved/beta_model.pth') 
-        
-        self.update_beta_priori(batch_size=batch_size)
-
-        alpha, beta = self.pref_replay_buffer.meta['beta_priori'][:, 0], self.pref_replay_buffer.meta['beta_priori'][:, 1]
-        alpha_2, beta_2 = self.pref_replay_buffer.meta['beta_priori_2'][:, 0], self.pref_replay_buffer.meta['beta_priori_2'][:, 1]
-
-        scores_1 = alpha - beta
-        scores_2 = alpha_2 - beta_2
-        scores = np.concatenate((scores_1, scores_2), axis = 0)
-        scores = (scores - scores.min()) / (scores.max() - scores.min())
-
-        votes_1 = meta['votes']
-        votes_2 = meta['votes_2']
-        votes = np.concatenate((votes_1, votes_2), axis = 0)
-        votes = np.clip(votes, 0, (votes.mean() + 3 * votes.std()))
-        votes = (votes - votes.min()) / (votes.max() - votes.min())
-
-        error = (np.abs(scores - votes)).mean()
-        print(f'Prediction error: {error}')
 
     def update_beta_priori(self, batch_size=3):
 
