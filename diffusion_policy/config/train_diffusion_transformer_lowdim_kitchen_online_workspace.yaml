@@ -81,14 +81,14 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 25
+  batch_size: 30
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 25
+  batch_size: 30
   num_workers: 1
   shuffle: True
   pin_memory: True
@@ -128,13 +128,14 @@ training:
   online:
     num_groups: 4
     all_votes: 100
-    reverse_rate: 0.25
+    reverse_rate: 0.2
     reverse_freq: 2
+    update_history: True
     diff_group: False
   map:
-    use_map: False
+    use_map: True
     map_batch_update: False
-    map_ratio: 0.25
+    map_ratio: 0.5
 
 
 logging:

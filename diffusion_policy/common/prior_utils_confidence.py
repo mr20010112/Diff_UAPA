@@ -334,7 +334,8 @@ class BetaNetwork(nn.Module):
                 y_f = (y_f - bias) / std
                 output = self.comp_model.one_to_one_forward(x_f, y_f)
                 return output
-            
+
+       
 
         self.model = BetaModel(obs_data, act_data, device)
         self.opt = None #, weight_decay=1.0e-4
@@ -343,8 +344,8 @@ class BetaNetwork(nn.Module):
 
     def get_alpha_beta(self, x):
         batch_comp = self.model(x).detach()
-        alpha = torch.sum(2 * torch.clamp(batch_comp - 0.5, min=0), dim=-1)
-        beta = torch.sum(2 * torch.clamp(0.5 - batch_comp, min=0), dim=-1)
+        alpha = torch.sum(batch_comp, dim=-1)
+        beta = torch.sum(1 - batch_comp, dim=-1)
         # alpha = torch.sum(torch.where(batch_comp > 0.5, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device)), dim=-1)
         # beta = torch.sum(torch.where(batch_comp < 0.5, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device)), dim=-1)
 

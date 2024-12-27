@@ -19,11 +19,15 @@ import wandb
 import tqdm
 import numpy as np
 import shutil
+import math
 import matplotlib.pyplot as plt
 from scipy.stats import beta
+from typing import Optional, Dict
 
 from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
+from diffusion_policy.common.prior_utils_confidence import BetaNetwork
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
+from diffusion_policy.policy.base_lowdim_policy import BaseLowdimPolicy
 from diffusion_policy.policy.diffusion_transformer_lowdim_policy import DiffusionTransformerLowdimPolicy
 from diffusion_policy.dataset.base_dataset import BaseLowdimDataset
 from diffusion_policy.env_runner.base_lowdim_runner import BaseLowdimRunner
@@ -35,6 +39,7 @@ from diffusers.training_utils import EMAModel
 from torch.cuda.amp import GradScaler, autocast 
 from diffusion_policy.model.common.slice import slice_episode
 from diffusion_policy.common.compute_all_loss import compute_all_traj_loss
+from diffusion_policy.common.compare_policy import comp_policy
 #from diffusion_policy.dataset.rlhf_kitchen_mjl_lowdim_dataset import RLHF_KitchenMjlLowdimDataset
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
@@ -81,12 +86,12 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             self.epoch = 0
 
         device = torch.device(cfg.training.device_gpu)
-        ref_model = copy.deepcopy(self.model.model)
+        ref_policy = copy.deepcopy(self.model)
         # ref_model.double()
-        ref_model.eval() 
-        for param in ref_model.parameters():
+        ref_policy.eval() 
+        for param in ref_policy.parameters():
             param.requires_grad = False
-        ref_model.to(device)
+        ref_policy.to(device)
 
         #device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") #add
 
@@ -103,7 +108,6 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         #device = torch.device(cfg.training.device_cpu)
         assert isinstance(expert_dataset, BaseLowdimDataset)
 
-
         # configure dataset
         normal_dataset: BaseLowdimDataset
         normal_dataset = hydra.utils.instantiate(cfg.task.normal_dataset)
@@ -113,13 +117,17 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         pref_dataset: BaseLowdimDataset
         pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, expert_replay_buffer=expert_dataset.replay_buffer, \
                                                normal_replay_buffer=normal_dataset.replay_buffer) #cfg.task.perf_dataset
-        
+
+        pref_dataset.set_beta_priori(data_size=150)
+        pref_dataset.beta_model.fit_data(num_epochs=50, warm_up_epochs=5, batch_size=5, lr=1.0e-5)
+        pref_dataset.update_beta_priori()
+
         # cut online groups
         all_votes_1, all_votes_2 = np.array([]), np.array([])
         votes_1, votes_2 = pref_dataset.pref_replay_buffer.meta['votes'], pref_dataset.pref_replay_buffer.meta['votes_2']
         ratio_alpha, ratio_beta = votes_1 / (votes_1 + votes_2), votes_2 / (votes_1 + votes_2)
-        votes_alpha = np.maximum(ratio_alpha*10, 1e-6)  # 将小于等于 0 的值替换为一个小正数
-        votes_beta = np.maximum(ratio_beta*10, 1e-6)
+        votes_alpha = np.maximum(ratio_alpha*6, 1e-6)  # 将小于等于 0 的值替换为一个小正数
+        votes_beta = np.maximum(ratio_beta*6, 1e-6)
 
         for local_epoch_idx in range(cfg.training.online.num_groups):
             ratio = np.stack([np.random.beta(votes_alpha[i], votes_beta[i]) for i in range(votes_alpha.shape[0])])
@@ -155,22 +163,19 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 all_votes_1[local_epoch_idx] = np.maximum(all_votes_1[local_epoch_idx], 0)
                 all_votes_2[local_epoch_idx] = np.maximum(all_votes_2[local_epoch_idx], 0)
     
-        init_votes_1 = np.sum(all_votes_1, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
-        init_votes_2 = np.sum(all_votes_2, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
-        # contains_nan_1 = np.isnan(init_votes_1).any()
-        # contains_nan_2 = np.isnan(init_votes_2).any()
-        # print(contains_nan_1, contains_nan_2)
-        pref_dataset.pref_replay_buffer.meta['votes'] = init_votes_1
-        pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2
+        # init_votes_1 = np.sum(all_votes_1, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
+        # init_votes_2 = np.sum(all_votes_2, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
 
-        pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1
-        pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2
+        # pref_dataset.pref_replay_buffer.meta['votes'] = init_votes_1
+        # pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2
+        # pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1
+        # pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2
 
-        pref_dataset.set_beta_priori()
-        pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=2, batch_size=5, lr=1.0e-6)
-        pref_dataset.update_beta_priori()
+        # pref_dataset.set_beta_priori(data_size=150)
+        # pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=30, warm_up_epochs=5, batch_size=5, lr=1.0e-6)
+        # pref_dataset.update_beta_priori()
 
-        # train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
+        train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset, expert_dataset, normal_dataset
 
         self.model.set_normalizer(normalizer)
@@ -191,6 +196,13 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             cfg.task.env_runner,
             output_dir=self.output_dir)
         assert isinstance(env_runner, BaseLowdimRunner)
+
+        # configure test-env runner
+        test_env_runner: BaseLowdimRunner
+        test_env_runner = hydra.utils.instantiate(
+            cfg.task.test_env_runner,
+            output_dir=self.output_dir)
+        assert isinstance(test_env_runner, BaseLowdimRunner)
 
         # configure logging
         wandb_run = wandb.init(
@@ -237,15 +249,28 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         with JsonLogger(log_path) as json_logger:
             for online_epoch_idx in range(cfg.training.online.num_groups):
                 print(f"Round {online_epoch_idx + 1} of {cfg.training.online.num_groups} for online training")
+                    
+                if online_epoch_idx > 0:
+                    if cfg.training.map.use_map:
+                        ref_policy = comp_policy(self, ref_policy = ref_policy, target_policy = self.model, env = test_env_runner, beta_model = pref_dataset.beta_model)
+                    else:
+                        ref_policy = copy.deepcopy(self.model)
 
-                ref_model = copy.deepcopy(self.model.model)
-
-                local_votes_1 = np.array(all_votes_1[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
-                local_votes_2 = np.array(all_votes_2[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
+                if not cfg.training.online.update_history:
+                    local_votes_1 = np.array(all_votes_1[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \
+                                            (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
+                    
+                    local_votes_2 = np.array(all_votes_2[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \
+                                            (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
+                else:
+                    local_votes_1 = np.array(all_votes_1[:online_epoch_idx+1].T / (all_votes_1[:online_epoch_idx+1].T + \
+                                            (all_votes_2[:online_epoch_idx+1].T)), dtype=np.float32).reshape(-1, 1)
+                    
+                    local_votes_2 = np.array(all_votes_2[:online_epoch_idx+1].T / (all_votes_1[:online_epoch_idx+1].T + \
+                                            (all_votes_2[:online_epoch_idx+1].T)), dtype=np.float32).reshape(-1, 1)
 
                 pref_dataset.pref_replay_buffer.meta['votes'] = local_votes_1
                 pref_dataset.pref_replay_buffer.meta['votes_2'] = local_votes_2
-
                 pref_dataset.pref_replay_buffer.root['meta']['votes'] = local_votes_1
                 pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = local_votes_2
 
@@ -283,8 +308,9 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                             # compute loss
                             avg_traj_loss = 0.0
                             if cfg.training.map.use_map and (not cfg.training.map.map_batch_update):
-                                avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, model = self.model, ref_model = ref_model)
-                            raw_loss = self.model.compute_loss(batch, ref_model=ref_model, avg_traj_loss = avg_traj_loss)
+                                avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
+                                                                      model = self.model, ref_model = ref_policy.model)
+                            raw_loss = self.model.compute_loss(batch, ref_model=ref_policy.model, avg_traj_loss = avg_traj_loss)
                             # map_loss_batch_numpy = [tensor.detach().cpu().numpy() for tensor in map_loss_batch]
                             # map_loss.append(map_loss_batch_numpy)
                             loss = raw_loss / cfg.training.gradient_accumulate_every
@@ -312,12 +338,12 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                                 'lr': lr_scheduler.get_last_lr()[0]
                             }
 
-                            # is_last_batch = (batch_idx == (len(train_dataloader)-1))
-                            # if not is_last_batch:
-                            #     # log of last step is combined with validation and rollout
-                            wandb_run.log(step_log, step=self.global_step)
-                            json_logger.log(step_log)
-                            self.global_step += 1
+                            is_last_batch = (batch_idx == (len(train_dataloader)*cfg.training.online.num_groups-1))
+                            if not is_last_batch:
+                                # log of last step is combined with validation and rollout
+                                wandb_run.log(step_log, step=self.global_step)
+                                json_logger.log(step_log)
+                                self.global_step += 1
 
                             if (cfg.training.max_train_steps is not None) \
                                 and batch_idx >= (cfg.training.max_train_steps-1):
@@ -336,7 +362,7 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
                     # run rollout
                     if (self.epoch % cfg.training.rollout_every) == 0:
-                        runner_log = env_runner.run(policy)
+                        runner_log, episode_data = env_runner.run(policy)
                         # log all
                         step_log.update(runner_log)
 

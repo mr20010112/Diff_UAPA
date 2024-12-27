@@ -222,11 +222,11 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
 
         return pref_data
 
-    def set_beta_priori(self):
+    def set_beta_priori(self, data_size=100):
         pref_data = self.construct_pref_data()
         self.beta_model = BetaNetwork(data=pref_data,
                                  device=self.gpu_device,
-                                 data_size=100)
+                                 data_size=data_size)
 
     def update_beta_priori(self, batch_size=3):
 
@@ -311,6 +311,8 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
 
         self.pref_replay_buffer.meta['beta_priori'] = np.array([alpha.cpu().numpy(), beta.cpu().numpy()]).T
         self.pref_replay_buffer.meta['beta_priori_2'] = np.array([alpha_2.cpu().numpy(), beta_2.cpu().numpy()]).T
+        self.pref_replay_buffer.root['meta']['beta_priori'] = np.array([alpha.cpu().numpy(), beta.cpu().numpy()]).T
+        self.pref_replay_buffer.root['meta']['beta_priori_2'] = np.array([alpha_2.cpu().numpy(), beta_2.cpu().numpy()]).T
 
     def get_validation_dataset(self):
         val_set = copy.copy(self)
