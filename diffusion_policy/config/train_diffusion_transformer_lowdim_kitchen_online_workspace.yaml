@@ -130,8 +130,7 @@ training:
     all_votes: 100
     reverse_rate: 0.2
     reverse_freq: 2
-    update_history: True
-    diff_group: False
+    update_history: False
   map:
     use_map: True
     map_batch_update: False

@@ -226,7 +226,6 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                         loss = raw_loss / cfg.training.gradient_accumulate_every
                         loss.backward()
 
-                        
                         # step optimizer
                         if self.global_step % cfg.training.gradient_accumulate_every == 0:
                             self.optimizer.step()
