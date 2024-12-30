@@ -124,29 +124,16 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         # pref_dataset.update_beta_priori()
 
         # cut online groups
-        all_votes_1, all_votes_2 = np.array([]), np.array([])
         votes_1, votes_2 = pref_dataset.pref_replay_buffer.meta['votes'], pref_dataset.pref_replay_buffer.meta['votes_2']
-        ratio_alpha, ratio_beta = votes_1 / (votes_1 + votes_2), votes_2 / (votes_1 + votes_2)
-        votes_alpha = np.maximum(ratio_alpha*8, 1e-6)  # 将小于等于 0 的值替换为一个小正数
-        votes_beta = np.maximum(ratio_beta*8, 1e-6)
+        var = (votes_1 * votes_2) / (((votes_1 + votes_2) ** 2) * (votes_1 + votes_2 + 1))
+        var_flat = var.flatten()
+        count = int(len(var_flat) * cfg.training.online.reverse_ratio)
+        threshold = np.partition(var_flat, -count)[-count]
+        indices = np.where(var_flat >= threshold)[0]
+        ratio_1, ratio_2 = votes_1 / (votes_1 + votes_2), votes_2 / (votes_1 + votes_2)
 
-        for local_epoch_idx in range(cfg.training.online.num_groups):
-            ratio = np.stack([np.random.beta(votes_alpha[i], votes_beta[i]) for i in range(votes_alpha.shape[0])])
-            local_votes_1 = np.round(cfg.training.online.all_votes / cfg.training.online.num_groups * ratio)
-            local_votes_2 = np.round(cfg.training.online.all_votes / cfg.training.online.num_groups - local_votes_1)
-
-            if local_epoch_idx == 0:
-                all_votes_1 = local_votes_1.T
-                all_votes_2 = local_votes_2.T
-            else:
-                all_votes_1 = np.concatenate((all_votes_1, local_votes_1.T), axis=0)
-                all_votes_2 = np.concatenate((all_votes_2, local_votes_2.T), axis=0)
-
-
-        sum_votes_1, sum_votes_2 = np.sum(all_votes_1, axis=0, keepdims=True), np.sum(all_votes_2, axis=0, keepdims=True)
-        sum_votes_1, sum_votes_2 = np.maximum(sum_votes_1, 1), np.maximum(sum_votes_2, 1)
-        all_votes_1, all_votes_2 = np.round(all_votes_1 / sum_votes_1 * (ratio_alpha.T * cfg.training.online.all_votes)), \
-                                    np.round(all_votes_2 / sum_votes_2 * (ratio_beta.T * cfg.training.online.all_votes))
+        all_votes_1 = np.array([np.round(ratio_1 * (cfg.training.online.all_votes / cfg.training.online.num_groups)) for _ in range(cfg.training.online.num_groups)])
+        all_votes_2 = np.array([np.round(ratio_2 * (cfg.training.online.all_votes / cfg.training.online.num_groups)) for _ in range(cfg.training.online.num_groups)])
 
 
         # add noise to votes
@@ -155,10 +142,11 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 # delta = np.round(cfg.training.online.all_votes / cfg.training.online.num_groups * cfg.training.online.reverse_rate)
                 X = stats.truncnorm(-3, 3, loc=cfg.training.online.reverse_rate, scale=cfg.training.online.reverse_rate/3)
                 noise_ratio = X.rvs(all_votes_1.shape[1])
+                noise_ratio = noise_ratio.reshape(-1, 1)
 
                 # condiction = (all_votes_1[local_epoch_idx] > all_votes_2[local_epoch_idx])
-                all_votes_1[local_epoch_idx], all_votes_2[local_epoch_idx] = all_votes_1[local_epoch_idx] + np.round((all_votes_2[local_epoch_idx] - all_votes_1[local_epoch_idx])*noise_ratio), \
-                                                                            all_votes_2[local_epoch_idx] + np.round((all_votes_1[local_epoch_idx] - all_votes_2[local_epoch_idx])*noise_ratio)
+                all_votes_1[local_epoch_idx][indices], all_votes_2[local_epoch_idx][indices] = all_votes_1[local_epoch_idx][indices] + np.round((all_votes_2[local_epoch_idx][indices] - all_votes_1[local_epoch_idx][indices]) * noise_ratio[indices]), \
+                                                                            all_votes_2[local_epoch_idx][indices] + np.round((all_votes_1[local_epoch_idx][indices] - all_votes_2[local_epoch_idx][indices]) * noise_ratio[indices])
                 
 
                 all_votes_1[local_epoch_idx] = np.maximum(all_votes_1[local_epoch_idx], 0)
@@ -198,12 +186,12 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             output_dir=self.output_dir)
         assert isinstance(env_runner, BaseLowdimRunner)
 
-        # configure test-env runner
-        test_env_runner: BaseLowdimRunner
-        test_env_runner = hydra.utils.instantiate(
-            cfg.task.test_env_runner,
-            output_dir=self.output_dir)
-        assert isinstance(test_env_runner, BaseLowdimRunner)
+        # # configure test-env runner
+        # test_env_runner: BaseLowdimRunner
+        # test_env_runner = hydra.utils.instantiate(
+        #     cfg.task.test_env_runner,
+        #     output_dir=self.output_dir)
+        # assert isinstance(test_env_runner, BaseLowdimRunner)
 
         # configure logging
         wandb_run = wandb.init(
