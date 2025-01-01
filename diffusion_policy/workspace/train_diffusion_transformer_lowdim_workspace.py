@@ -97,30 +97,30 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         normalizer = dataset.get_normalizer()
 
         # configure dataset
-        expert_dataset: BaseLowdimDataset
-        expert_dataset = hydra.utils.instantiate(cfg.task.expert_dataset)
+        dataset_1: BaseLowdimDataset
+        dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
         #device = torch.device(cfg.training.device_cpu)
-        assert isinstance(expert_dataset, BaseLowdimDataset)
+        assert isinstance(dataset_1, BaseLowdimDataset)
 
 
         # configure dataset
-        normal_dataset: BaseLowdimDataset
-        normal_dataset = hydra.utils.instantiate(cfg.task.normal_dataset)
+        dataset_2: BaseLowdimDataset
+        dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
         # expert_normalizer = normal_dataset.get_normalizer()
-        assert isinstance(normal_dataset, BaseLowdimDataset)
+        assert isinstance(dataset_2, BaseLowdimDataset)
 
         pref_dataset: BaseLowdimDataset
-        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, expert_replay_buffer=expert_dataset.replay_buffer, \
-                                               normal_replay_buffer=normal_dataset.replay_buffer) #cfg.task.perf_dataset
-        pref_dataset.set_beta_priori()
-        pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=10, warm_up_epochs=2, batch_size=5, lr = 1.0e-6)
+        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset_1.replay_buffer, \
+                                               replay_buffer_2=dataset_2.replay_buffer) #cfg.task.perf_dataset
+        # pref_dataset.set_beta_priori()
+        # pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=10, warm_up_epochs=2, batch_size=5, lr = 1.0e-6)
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
-        del dataset, expert_dataset, normal_dataset
+        del dataset, dataset_1, dataset_2
 
-        # configure validation dataset
-        val_dataset = pref_dataset.get_validation_dataset()
-        val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
+        # # configure validation dataset
+        # val_dataset = pref_dataset.get_validation_dataset()
+        # val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
 
         self.model.set_normalizer(normalizer)
         if cfg.training.use_ema:
@@ -221,8 +221,6 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                         if cfg.training.map.use_map and (not cfg.training.map.map_batch_update):
                             avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, model = self.model, ref_model = ref_model)
                         raw_loss = self.model.compute_loss(batch, ref_model=ref_model, avg_traj_loss = avg_traj_loss)
-                        # map_loss_batch_numpy = [tensor.detach().cpu().numpy() for tensor in map_loss_batch]
-                        # map_loss.append(map_loss_batch_numpy)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
                         loss.backward()
 
@@ -271,27 +269,27 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
                 # run rollout
                 if (self.epoch % cfg.training.rollout_every) == 0:
-                    runner_log, episode_data = env_runner.run(policy)
+                    runner_log, _ = env_runner.run(policy)
                     # log all
                     step_log.update(runner_log)
 
-                # run validation
-                if (self.epoch % cfg.training.val_every) == 0:
-                    with torch.no_grad():
-                        val_losses = list()
-                        with tqdm.tqdm(val_dataloader, desc=f"Validation epoch {self.epoch}", 
-                                leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
-                            for batch_idx, batch in enumerate(tepoch):
-                                batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
-                                loss = self.model.compute_loss(batch, ref_model=ref_model, avg_traj_loss = avg_traj_loss)
-                                val_losses.append(loss)
-                                if (cfg.training.max_val_steps is not None) \
-                                    and batch_idx >= (cfg.training.max_val_steps-1):
-                                    break
-                        if len(val_losses) > 0:
-                            val_loss = torch.mean(torch.tensor(val_losses)).item()
-                            # log epoch average validation loss
-                            step_log['val_loss'] = val_loss
+                # # run validation
+                # if (self.epoch % cfg.training.val_every) == 0:
+                #     with torch.no_grad():
+                #         val_losses = list()
+                #         with tqdm.tqdm(val_dataloader, desc=f"Validation epoch {self.epoch}", 
+                #                 leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
+                #             for batch_idx, batch in enumerate(tepoch):
+                #                 batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
+                #                 loss = self.model.compute_loss(batch, ref_model=ref_model, avg_traj_loss = avg_traj_loss)
+                #                 val_losses.append(loss)
+                #                 if (cfg.training.max_val_steps is not None) \
+                #                     and batch_idx >= (cfg.training.max_val_steps-1):
+                #                     break
+                #         if len(val_losses) > 0:
+                #             val_loss = torch.mean(torch.tensor(val_losses)).item()
+                #             # log epoch average validation loss
+                #             step_log['val_loss'] = val_loss
 
                 # run diffusion sampling on a training batch
                 if (self.epoch % cfg.training.sample_every) == 0:

@@ -239,6 +239,10 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
         all_video_paths = [None] * n_inits
         all_rewards = [None] * n_inits
 
+        # initialize lists to collect data
+        observations, actions, rewards, terminals = [[] for _ in range(n_envs)], [[] for _ in range(n_envs)], \
+        [[] for _ in range(n_envs)], [[] for _ in range(n_envs)]
+
         for chunk_idx in range(n_chunks):
             start = chunk_idx * n_envs
             end = min(n_inits, start + n_envs)
@@ -260,6 +264,9 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
             obs = env.reset()
             past_action = None
             policy.reset()
+
+            for i in range(n_envs):
+                observations[i].extend(obs[i, ...])
 
             env_name = self.env_meta['env_name']
             pbar = tqdm.tqdm(total=self.max_steps, desc=f"Eval {env_name}Lowdim {chunk_idx+1}/{n_chunks}", 
@@ -303,8 +310,19 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
                     env_action = self.undo_transform_action(action)
 
                 obs, reward, done, info = env.step(env_action)
-                done = np.all(done)
+                all_done = np.all(done)
                 past_action = action
+
+                # collect data
+                for i in range(n_envs):
+                    if not all_done:
+                        observations[i].extend(obs[i, ...])
+                    actions[i].extend(action[i, :self.n_action_steps, ...])
+                    # rewards[i].extend([reward[i]] * len(obs[i, ...]))
+                    if not done[i]:
+                        terminals[i].extend([False] * len(obs[i, ...]))
+                    else:
+                        terminals[i].extend([False] * (len(obs[i, ...])-1) + [True])
 
                 # update pbar
                 pbar.update(action.shape[1])
@@ -313,6 +331,19 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
             # collect data for this round
             all_video_paths[this_global_slice] = env.render()[this_local_slice]
             all_rewards[this_global_slice] = env.call('get_attr', 'reward')[this_local_slice]
+
+            for i in range(n_envs):
+                episode_reward = np.array(all_rewards[i])
+                indices = np.argwhere(episode_reward == 1.0).flatten()  # 提取一维索引
+                if indices.size == 0:  # 没有找到值为1的索引
+                    rewards[i].extend([0.0] * len(episode_reward))
+                else:
+                    prev_index = 0
+                    for j, idx in enumerate(indices):
+                        rewards[i].extend([1.0 / (idx - prev_index)] * (idx - prev_index))
+                        prev_index = idx  # 更新上一索引
+                    
+                    rewards[i].extend([0.0] * (len(episode_reward) - prev_index))
 
         # log
         max_rewards = collections.defaultdict(list)
@@ -343,6 +374,13 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
             name = prefix+'mean_score'
             value = np.mean(value)
             log_data[name] = value
+
+        episode_data = {
+            'observations': np.array(observations),
+            'actions': np.array(actions),
+            'rewards': np.array(rewards),
+            'terminals': np.array(terminals),
+        }
 
         return log_data
 

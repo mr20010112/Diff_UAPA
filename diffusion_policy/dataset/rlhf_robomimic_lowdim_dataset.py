@@ -24,7 +24,7 @@ from diffusion_policy.common.prior_utils_confidence import BetaNetwork
 
 #处理 "kitchen" 任务的低维数据集。该类从 .mjl 文件中解析数据，存储在 ReplayBuffer 中，并对数据进行采样
 
-class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
+class RLHF_RobomimicReplayLowdimDataset(BaseLowdimDataset):
     def __init__(self,
                 replay_buffer_1: ReplayBuffer,
                 replay_buffer_2: ReplayBuffer,
@@ -201,7 +201,7 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
         self.length = N
         self.train_mask = train_mask
         self.sequence_length = sequence_length
-        self.beta_model: Optional[BetaNetwork] = None
+        # self.beta_model: Optional[BetaNetwork] = None
 
 
     # def get_normalizer(self, mode='limits', **kwargs):
@@ -212,107 +212,108 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
     #     normalizer = LinearNormalizer()
     #     normalizer.fit(data=self.replay_buffer.data, last_n_dims=1, mode=mode, **kwargs)
     #     return normalizer
-    def construct_pref_data(self):
-        data = self.pref_replay_buffer.data
-        pref_data = data.copy()
-        meta = self.pref_replay_buffer.meta
-        pref_data.update(meta)
-        if 'episode_ends' in pref_data.keys():
-            del pref_data['episode_ends']
 
-        return pref_data
+    # def construct_pref_data(self):
+    #     data = self.pref_replay_buffer.data
+    #     pref_data = data.copy()
+    #     meta = self.pref_replay_buffer.meta
+    #     pref_data.update(meta)
+    #     if 'episode_ends' in pref_data.keys():
+    #         del pref_data['episode_ends']
 
-    def set_beta_priori(self, data_size=100):
-        pref_data = self.construct_pref_data()
-        self.beta_model = BetaNetwork(data=pref_data,
-                                 device=self.gpu_device,
-                                 data_size=data_size)
+    #     return pref_data
 
-    def update_beta_priori(self, batch_size=3):
+    # def set_beta_priori(self, data_size=100):
+    #     pref_data = self.construct_pref_data()
+    #     self.beta_model = BetaNetwork(data=pref_data,
+    #                              device=self.gpu_device,
+    #                              data_size=data_size)
 
-        def scale_to_range(x, min_val, max_val, target_min=1, target_max=10):
+    # def update_beta_priori(self, batch_size=3):
 
-            if min_val == max_val:
-                raise ValueError("min_val and max_val must be different to avoid division by zero.")
-            return target_min + (x - min_val) * (target_max - target_min) / (max_val - min_val)
+    #     def scale_to_range(x, min_val, max_val, target_min=1, target_max=10):
 
-        # Define unified scaling logic
-        def scale_tensor(x, global_min, global_max, target_min=1, target_max=10):
+    #         if min_val == max_val:
+    #             raise ValueError("min_val and max_val must be different to avoid division by zero.")
+    #         return target_min + (x - min_val) * (target_max - target_min) / (max_val - min_val)
 
-            # Ensure the tensor is a floating-point tensor
-            if not torch.is_floating_point(x):
-                x = x.float()
+    #     # Define unified scaling logic
+    #     def scale_tensor(x, global_min, global_max, target_min=1, target_max=10):
 
-            local_min, local_max = torch.min(x), torch.max(x)
+    #         # Ensure the tensor is a floating-point tensor
+    #         if not torch.is_floating_point(x):
+    #             x = x.float()
 
-            # Handle division by zero for local range
-            if local_min == local_max:
-                return torch.full_like(x, target_min)  # Return tensor filled with target_min
+    #         local_min, local_max = torch.min(x), torch.max(x)
 
-            # Handle division by zero for global range
-            # if global_min < 1:
-            #     global_min = 1  # Replace 0 with a small positive value to avoid division by zero
-            if global_min == global_max:
-                raise ValueError("global_min and global_max must be different to avoid division by zero.")
+    #         # Handle division by zero for local range
+    #         if local_min == local_max:
+    #             return torch.full_like(x, target_min)  # Return tensor filled with target_min
 
-            # Compute scaled local range
-            scaled_min = (local_min / global_min) * target_min
-            scaled_max = (local_max / global_max) * target_max
+    #         # Handle division by zero for global range
+    #         # if global_min < 1:
+    #         #     global_min = 1  # Replace 0 with a small positive value to avoid division by zero
+    #         if global_min == global_max:
+    #             raise ValueError("global_min and global_max must be different to avoid division by zero.")
 
-            # Apply scaling
-            return scale_to_range(x, local_min, local_max, scaled_min, scaled_max)
+    #         # Compute scaled local range
+    #         scaled_min = (local_min / global_min) * target_min
+    #         scaled_max = (local_max / global_max) * target_max
 
-        obs_1 = self.pref_replay_buffer.data['obs']
-        obs_2 = self.pref_replay_buffer.data['obs_2']
-        action_1 = self.pref_replay_buffer.data['action']
-        action_2 = self.pref_replay_buffer.data['action_2']
-        s_a_1 = np.concatenate([obs_1, action_1], axis=-1)
-        s_a_2 = np.concatenate([obs_2, action_2], axis=-1)
+    #         # Apply scaling
+    #         return scale_to_range(x, local_min, local_max, scaled_min, scaled_max)
 
-        interval = math.ceil(s_a_1.shape[0] / batch_size)
-        alpha, beta = [], []
-        alpha_2, beta_2 = [], []
-        for i in range(interval):
-            start_pt = i * batch_size
-            end_pt = min((i + 1) * batch_size, s_a_1.shape[0])
-            batch_s_a_1 = s_a_1[start_pt:end_pt, ...]
-            batch_s_a_2 = s_a_2[start_pt:end_pt, ...]
+    #     obs_1 = self.pref_replay_buffer.data['obs']
+    #     obs_2 = self.pref_replay_buffer.data['obs_2']
+    #     action_1 = self.pref_replay_buffer.data['action']
+    #     action_2 = self.pref_replay_buffer.data['action_2']
+    #     s_a_1 = np.concatenate([obs_1, action_1], axis=-1)
+    #     s_a_2 = np.concatenate([obs_2, action_2], axis=-1)
 
-            batch_alpha, batch_beta = self.beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_1).float().to(self.beta_model.device))
-            batch_alpha_2, batch_beta_2 = self.beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_2).float().to(self.beta_model.device))
+    #     interval = math.ceil(s_a_1.shape[0] / batch_size)
+    #     alpha, beta = [], []
+    #     alpha_2, beta_2 = [], []
+    #     for i in range(interval):
+    #         start_pt = i * batch_size
+    #         end_pt = min((i + 1) * batch_size, s_a_1.shape[0])
+    #         batch_s_a_1 = s_a_1[start_pt:end_pt, ...]
+    #         batch_s_a_2 = s_a_2[start_pt:end_pt, ...]
 
-            alpha.append(batch_alpha)
-            beta.append(batch_beta)
-            alpha_2.append(batch_alpha_2)
-            beta_2.append(batch_beta_2)
+    #         batch_alpha, batch_beta = self.beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_1).float().to(self.beta_model.device))
+    #         batch_alpha_2, batch_beta_2 = self.beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_2).float().to(self.beta_model.device))
 
-        alpha = torch.cat(alpha, dim=0)+1
-        beta = torch.cat(beta, dim=0)+1
-        alpha_2 = torch.cat(alpha_2, dim=0)+1
-        beta_2 = torch.cat(beta_2, dim=0)+1
+    #         alpha.append(batch_alpha)
+    #         beta.append(batch_beta)
+    #         alpha_2.append(batch_alpha_2)
+    #         beta_2.append(batch_beta_2)
 
-        mean_value = torch.mean(torch.cat([alpha, beta, alpha_2, beta_2]))
-        std_value = torch.std(torch.cat([alpha, beta, alpha_2, beta_2]))
+    #     alpha = torch.cat(alpha, dim=0)+1
+    #     beta = torch.cat(beta, dim=0)+1
+    #     alpha_2 = torch.cat(alpha_2, dim=0)+1
+    #     beta_2 = torch.cat(beta_2, dim=0)+1
 
-        alpha = torch.clamp(alpha, max=mean_value+3*std_value)
-        beta = torch.clamp(beta, max=mean_value+3*std_value)
-        alpha_2 = torch.clamp(alpha_2, max=mean_value+3*std_value)
-        beta_2 = torch.clamp(beta_2, max=mean_value+3*std_value)
+    #     mean_value = torch.mean(torch.cat([alpha, beta, alpha_2, beta_2]))
+    #     std_value = torch.std(torch.cat([alpha, beta, alpha_2, beta_2]))
 
-        max_value = torch.max(torch.cat([alpha, beta, alpha_2, beta_2]))
-        min_value = torch.min(torch.cat([alpha, beta, alpha_2, beta_2]))
+    #     alpha = torch.clamp(alpha, max=mean_value+3*std_value)
+    #     beta = torch.clamp(beta, max=mean_value+3*std_value)
+    #     alpha_2 = torch.clamp(alpha_2, max=mean_value+3*std_value)
+    #     beta_2 = torch.clamp(beta_2, max=mean_value+3*std_value)
 
-        target_min, target_max = 1, 10
+    #     max_value = torch.max(torch.cat([alpha, beta, alpha_2, beta_2]))
+    #     min_value = torch.min(torch.cat([alpha, beta, alpha_2, beta_2]))
 
-        alpha = scale_tensor(alpha, min_value, max_value, target_min, target_max)
-        beta = scale_tensor(beta, min_value, max_value, target_min, target_max)
-        alpha_2 = scale_tensor(alpha_2, min_value, max_value, target_min, target_max)
-        beta_2 = scale_tensor(beta_2, min_value, max_value, target_min, target_max)
+    #     target_min, target_max = 1, 10
 
-        self.pref_replay_buffer.meta['beta_priori'] = np.array([alpha.cpu().numpy(), beta.cpu().numpy()]).T
-        self.pref_replay_buffer.meta['beta_priori_2'] = np.array([alpha_2.cpu().numpy(), beta_2.cpu().numpy()]).T
-        self.pref_replay_buffer.root['meta']['beta_priori'] = np.array([alpha.cpu().numpy(), beta.cpu().numpy()]).T
-        self.pref_replay_buffer.root['meta']['beta_priori_2'] = np.array([alpha_2.cpu().numpy(), beta_2.cpu().numpy()]).T
+    #     alpha = scale_tensor(alpha, min_value, max_value, target_min, target_max)
+    #     beta = scale_tensor(beta, min_value, max_value, target_min, target_max)
+    #     alpha_2 = scale_tensor(alpha_2, min_value, max_value, target_min, target_max)
+    #     beta_2 = scale_tensor(beta_2, min_value, max_value, target_min, target_max)
+
+    #     self.pref_replay_buffer.meta['beta_priori'] = np.array([alpha.cpu().numpy(), beta.cpu().numpy()]).T
+    #     self.pref_replay_buffer.meta['beta_priori_2'] = np.array([alpha_2.cpu().numpy(), beta_2.cpu().numpy()]).T
+    #     self.pref_replay_buffer.root['meta']['beta_priori'] = np.array([alpha.cpu().numpy(), beta.cpu().numpy()]).T
+    #     self.pref_replay_buffer.root['meta']['beta_priori_2'] = np.array([alpha_2.cpu().numpy(), beta_2.cpu().numpy()]).T
 
     def get_validation_dataset(self):
         val_set = copy.copy(self)

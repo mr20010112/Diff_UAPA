@@ -12,7 +12,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "--config-name=train_diffusion_transformer_lowdim_kitchen_online_workspace.yaml"
+                "--config-name=train_diffusion_transformer_lowdim_kitchen_workspace.yaml"
             ]
         }
     ]

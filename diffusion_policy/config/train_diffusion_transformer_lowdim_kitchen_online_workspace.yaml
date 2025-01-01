@@ -54,7 +54,7 @@ policy:
     prediction_type: epsilon # or sample
 
   gamma: ${gamma}
-  beta: 1.0
+  beta: 0.00357
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
   map_batch_update: ${training.map.map_batch_update}
@@ -133,9 +133,9 @@ training:
     reverse_freq: 1
     update_history: False
   map:
-    use_map: False
+    use_map: True
     map_batch_update: False
-    map_ratio: 0.5
+    map_ratio: 0.25
 
 
 logging:

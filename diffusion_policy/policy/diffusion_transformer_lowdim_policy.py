@@ -24,7 +24,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             model: TransformerForDiffusion,
             noise_scheduler: DDPMScheduler,
             gamma,
-            beta,
             train_time_samples,
             horizon, 
             obs_dim, 
@@ -36,6 +35,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             pred_action_steps_only=False,
             use_map=False,
             map_batch_update=False,
+            beta=1.0,
             map_ratio=1.0,
             bias_reg=1.0,
             # parameters passed to step
@@ -211,22 +211,22 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         votes_2 = batch["votes_2"].to(self.device)
         # votes_2[votes_2 == 0.5] = 0
         beta_priori_2 = batch["beta_priori_2"].to(self.device)
-        save_avg_traj_loss = torch.tensor(avg_traj_loss, device=self.device)
+        save_avg_traj_loss = torch.tensor(avg_traj_loss, device=self.device).detach()
         # length = batch["length"]
         # length_2 = batch["length_2"]
 
-        beta_priori = beta_priori + 1
-        beta_priori_2 = beta_priori_2 + 1
+        # beta_priori = beta_priori + 1
+        # beta_priori_2 = beta_priori_2 + 1
 
-        threshold = 1e-3
+        threshold = 1e-2
         diff = torch.abs(votes_1 - votes_2)
         condition_1 = (votes_1 > votes_2) & (diff >= threshold)  # votes_1 > votes_2 and diff >= threshold
         condition_2 = (votes_1 < votes_2) & (diff >= threshold)  # votes_1 < votes_2 and diff >= threshold
 
         votes_1 = torch.where(condition_1, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device))
-        votes_1 = torch.squeeze(votes_1, dim=-1)
+        votes_1 = torch.squeeze(votes_1, dim=-1).detach()
         votes_2 = torch.where(condition_2, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device))
-        votes_2 = torch.squeeze(votes_2, dim=-1)
+        votes_2 = torch.squeeze(votes_2, dim=-1).detach()
 
         # chaos labels
         
@@ -299,7 +299,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                             - torch.norm((ref_pred_1 - noise_1) * loss_mask_1.type(ref_pred_1.dtype), dim=-1) ** 2
                 # slice_loss_1 = F.mse_loss(pred_1 * loss_mask_1.type(pred_1.dtype), target * loss_mask_1.type(target.dtype), reduction='none')
 
-                traj_loss_1 += (slice_loss_1) * (self.gamma ** (i*self.horizon + torch.arange(1, self.horizon + 1, device=self.device)))
+                traj_loss_1 += (slice_loss_1) * (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device)))
 
             for i in range(len(obs_2)):
                 obs_2_slide = obs_2[i]
@@ -332,7 +332,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                             - torch.norm((ref_pred_2 - noise_2) * loss_mask_2.type(ref_pred_2.dtype), dim=-1) ** 2
                 # slice_loss_2 = F.mse_loss(pred_2 * loss_mask_2.type(pred_2.dtype), target * loss_mask_2.type(target.dtype), reduction='none')
 
-                traj_loss_2 += (slice_loss_2) * (self.gamma ** (i*self.horizon + torch.arange(1, self.horizon + 1, device=self.device)))
+                traj_loss_2 += (slice_loss_2) * (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device)))
 
 
             traj_loss_1 = torch.sum(traj_loss_1, dim=-1)
@@ -359,16 +359,15 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 beta_dist = Beta(beta_priori[:, 0], beta_priori[:, 1])
                 beta_dist_2 = Beta(beta_priori_2[:, 0], beta_priori_2[:, 1])
 
-                # max_idx_1 = (beta_priori[:, 0] - 1) / (beta_priori[:, 0] + beta_priori[:, 1] - 2)
-                # max_idx_2 = (beta_priori_2[:, 0] - 1) / (beta_priori_2[:, 0] + beta_priori_2[:, 1] - 2)
+                max_idx_1 = (beta_priori[:, 0] - 1) / (beta_priori[:, 0] + beta_priori[:, 1] - 2)
+                max_idx_2 = (beta_priori_2[:, 0] - 1) / (beta_priori_2[:, 0] + beta_priori_2[:, 1] - 2)
 
                 map_loss_1 = - beta_dist.log_prob(torch.clamp(torch.sigmoid(traj_loss_1 - avg_traj_loss), min=1e-4, max=1-1e-4)) \
-                            # + beta_dist.log_prob(torch.clamp(max_idx_1, min=1e-4, max=1-1e-4))
-                            
-                map_loss_2 = - beta_dist_2.log_prob(torch.clamp(torch.sigmoid(traj_loss_2 - avg_traj_loss), min=1e-4, max=1-1e-4)) \
-                            # + beta_dist_2.log_prob(torch.clamp(max_idx_2, min=1e-4, max=1-1e-4))
+                            + beta_dist.log_prob(torch.clamp(max_idx_1, min=1e-4, max=1-1e-4))
 
-                
+                map_loss_2 = - beta_dist_2.log_prob(torch.clamp(torch.sigmoid(traj_loss_2 - avg_traj_loss), min=1e-4, max=1-1e-4)) \
+                            + beta_dist_2.log_prob(torch.clamp(max_idx_2, min=1e-4, max=1-1e-4))
+
                 loss += self.map_ratio * (map_loss_1 + map_loss_2) / (2 * self.train_time_samples[0])
 
         return torch.mean(loss)
