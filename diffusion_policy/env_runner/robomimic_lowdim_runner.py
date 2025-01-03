@@ -334,7 +334,7 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
 
             for i in range(n_envs):
                 episode_reward = np.array(all_rewards[i])
-                indices = np.argwhere(episode_reward == 1.0).flatten()  # 提取一维索引
+                indices = np.argwhere(episode_reward > 0.0).flatten()  # 提取一维索引
                 if indices.size == 0:  # 没有找到值为1的索引
                     rewards[i].extend([0.0] * len(episode_reward))
                 else:

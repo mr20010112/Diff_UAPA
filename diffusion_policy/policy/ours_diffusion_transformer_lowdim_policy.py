@@ -252,10 +252,10 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         action_2 = nbatch_2['action']
         # del nbatch_1, nbatch_2, batch_1, batch_2
 
-        obs_1 = slice_episode(obs_1, horizon=self.horizon, stride=self.horizon)
-        action_1 = slice_episode(action_1, horizon=self.horizon, stride=self.horizon)
-        obs_2 = slice_episode(obs_2, horizon=self.horizon, stride=self.horizon)
-        action_2 = slice_episode(action_2, horizon=self.horizon, stride=self.horizon)
+        obs_1 = slice_episode(obs_1, horizon=self.horizon, stride=self.n_action_steps)
+        action_1 = slice_episode(action_1, horizon=self.horizon, stride=self.n_action_steps)
+        obs_2 = slice_episode(obs_2, horizon=self.horizon, stride=self.n_action_steps)
+        action_2 = slice_episode(action_2, horizon=self.horizon, stride=self.n_action_steps)
 
         bsz = obs_1[0].shape[0]
         loss = 0
@@ -299,7 +299,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                             - torch.norm((ref_pred_1 - noise_1) * loss_mask_1.type(ref_pred_1.dtype), dim=-1) ** 2
                 # slice_loss_1 = F.mse_loss(pred_1 * loss_mask_1.type(pred_1.dtype), target * loss_mask_1.type(target.dtype), reduction='none')
 
-                traj_loss_1 += (slice_loss_1) * (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device)))
+                traj_loss_1 += (slice_loss_1) * (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device))).reshape(1, -1)
 
             for i in range(len(obs_2)):
                 obs_2_slide = obs_2[i]
@@ -332,7 +332,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                             - torch.norm((ref_pred_2 - noise_2) * loss_mask_2.type(ref_pred_2.dtype), dim=-1) ** 2
                 # slice_loss_2 = F.mse_loss(pred_2 * loss_mask_2.type(pred_2.dtype), target * loss_mask_2.type(target.dtype), reduction='none')
 
-                traj_loss_2 += (slice_loss_2) * (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device)))
+                traj_loss_2 += (slice_loss_2) * (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device))).reshape(1, -1)
 
 
             traj_loss_1 = torch.sum(traj_loss_1, dim=-1)

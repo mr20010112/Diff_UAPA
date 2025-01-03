@@ -21,19 +21,23 @@ import numpy as np
 import shutil
 
 from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
+from diffusion_policy.model.common.lr_scheduler import get_scheduler
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
-from diffusion_policy.policy.diffusion_transformer_lowdim_policy import DiffusionTransformerLowdimPolicy
+from diffusion_policy.policy.cpl_bet_lowdim_policy import BETLowdimPolicy
 from diffusion_policy.dataset.base_dataset import BaseLowdimDataset
 from diffusion_policy.env_runner.base_lowdim_runner import BaseLowdimRunner
 from diffusion_policy.common.checkpoint_util import TopKCheckpointManager
+from diffusion_policy.model.common.normalizer import (
+    LinearNormalizer, 
+    SingleFieldLinearNormalizer
+)
 from diffusion_policy.common.json_logger import JsonLogger
-from diffusion_policy.model.common.lr_scheduler import get_scheduler
 from diffusers.training_utils import EMAModel
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 # %%
-class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
+class PbrlBETLowdimWorkspace(BaseWorkspace):
     include_keys = ['global_step', 'epoch']
 
     def __init__(self, cfg: OmegaConf):
@@ -46,21 +50,19 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         random.seed(seed)
 
         # configure model
-        self.model: DiffusionTransformerLowdimPolicy
-        self.model = hydra.utils.instantiate(cfg.policy)
-
-        self.ema_model: DiffusionTransformerLowdimPolicy = None
-        if cfg.training.use_ema:
-            self.ema_model = copy.deepcopy(self.model)
+        self.policy: BETLowdimPolicy
+        self.policy = hydra.utils.instantiate(cfg.policy)
 
         # configure training state
-        self.optimizer = self.model.get_optimizer(**cfg.optimizer)
+        self.optimizer = self.policy.get_optimizer(**cfg.optimizer)
 
         self.global_step = 0
         self.epoch = 0
 
+
     def run(self):
         cfg = copy.deepcopy(self.cfg)
+        OmegaConf.resolve(cfg)
 
         # resume training
         if cfg.training.resume:
@@ -68,21 +70,63 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             if lastest_ckpt_path.is_file():
                 print(f"Resuming from checkpoint {lastest_ckpt_path}")
                 self.load_checkpoint(path=lastest_ckpt_path)
+            self.optimizer = self.policy.get_optimizer(**cfg.optimizer)
+            self.global_step = 0
+            self.epoch = 0
+
+        device = torch.device(cfg.training.device_gpu)
+        ref_model = copy.deepcopy(self.policy)
+        # ref_model.double()
+        ref_model.eval() 
+        for param in ref_model.parameters():
+            param.requires_grad = False
+        ref_model.to(device)
 
         # configure dataset
         dataset: BaseLowdimDataset
-        dataset = hydra.utils.instantiate(cfg.task.dataset)
+        dataset = hydra.utils.instantiate(cfg.task.origin_dataset)
         assert isinstance(dataset, BaseLowdimDataset)
-        train_dataloader = DataLoader(dataset, **cfg.dataloader)
-        normalizer = dataset.get_normalizer()
+        # train_dataloader = DataLoader(dataset, **cfg.dataloader)
 
         # configure validation dataset
         val_dataset = dataset.get_validation_dataset()
         val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
 
-        self.model.set_normalizer(normalizer)
-        if cfg.training.use_ema:
-            self.ema_model.set_normalizer(normalizer)
+        # set normalizer
+        normalizer = None
+        if cfg.training.enable_normalizer:
+            normalizer = dataset.get_normalizer()
+        else:
+            normalizer = LinearNormalizer()
+            normalizer['action'] = SingleFieldLinearNormalizer.create_identity()
+            normalizer['obs'] = SingleFieldLinearNormalizer.create_identity()
+
+        self.policy.set_normalizer(normalizer)
+
+        # fit action_ae (K-Means)
+        self.policy.fit_action_ae(
+                normalizer['action'].normalize(
+                    dataset.get_all_actions()))
+
+        # configure dataset
+        dataset_1: BaseLowdimDataset
+        dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
+        #device = torch.device(cfg.training.device_cpu)
+        assert isinstance(dataset_1, BaseLowdimDataset)
+
+
+        # configure dataset
+        dataset_2: BaseLowdimDataset
+        dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
+        # expert_normalizer = normal_dataset.get_normalizer()
+        assert isinstance(dataset_2, BaseLowdimDataset)
+
+        pref_dataset: BaseLowdimDataset
+        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset_1.replay_buffer, \
+                                               replay_buffer_2=dataset_2.replay_buffer) #cfg.task.perf_dataset
+
+        train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
+        del dataset, dataset_1, dataset_2
 
         # configure lr scheduler
         lr_scheduler = get_scheduler(
@@ -97,45 +141,36 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             last_epoch=self.global_step-1
         )
 
-        # configure ema
-        ema: EMAModel = None
-        if cfg.training.use_ema:
-            ema = hydra.utils.instantiate(
-                cfg.ema,
-                model=self.ema_model)
+        # # configure env runner
+        # env_runner: BaseLowdimRunner
+        # env_runner = hydra.utils.instantiate(
+        #     cfg.task.env_runner,
+        #     output_dir=self.output_dir)
+        # assert isinstance(env_runner, BaseLowdimRunner)
 
-        # configure env runner
-        env_runner: BaseLowdimRunner
-        env_runner = hydra.utils.instantiate(
-            cfg.task.env_runner,
-            output_dir=self.output_dir)
-        assert isinstance(env_runner, BaseLowdimRunner)
+        # # configure logging
+        # wandb_run = wandb.init(
+        #     dir=str(self.output_dir),
+        #     config=OmegaConf.to_container(cfg, resolve=True),
+        #     **cfg.logging
+        # )
+        # wandb.config.update(
+        #     {
+        #         "output_dir": self.output_dir,
+        #     }
+        # )
 
-        # configure logging
-        wandb_run = wandb.init(
-            dir=str(self.output_dir),
-            config=OmegaConf.to_container(cfg, resolve=True),
-            **cfg.logging
-        )
-        wandb.config.update(
-            {
-                "output_dir": self.output_dir,
-            }
-        )
-
-        # configure checkpoint
-        topk_manager = TopKCheckpointManager(
-            save_dir=os.path.join(self.output_dir, 'checkpoints'),
-            **cfg.checkpoint.topk
-        )
+        # # configure checkpoint
+        # topk_manager = TopKCheckpointManager(
+        #     save_dir=os.path.join(self.output_dir, 'checkpoints'),
+        #     **cfg.checkpoint.topk
+        # )
 
         # device transfer
-        device = torch.device(cfg.training.device)
-        self.model.to(device)
-        if self.ema_model is not None:
-            self.ema_model.to(device)
+        device = torch.device(cfg.training.device_gpu)
+        self.policy.to(device)
         optimizer_to(self.optimizer, device)
-
+        
         # save batch for sampling
         train_sampling_batch = None
 
@@ -164,19 +199,20 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                             train_sampling_batch = batch
 
                         # compute loss
-                        raw_loss = self.model.compute_loss(batch)
+                        torch.autograd.set_detect_anomaly(True)
+                        raw_loss = self.policy.compute_loss(batch)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
-                        loss.backward()
+                        loss.backward(retain_graph=True)
+
+                        # clip grad norm
+                        torch.nn.utils.clip_grad_norm_(
+                            self.policy.state_prior.parameters(), cfg.training.grad_norm_clip
+                        )
 
                         # step optimizer
                         if self.global_step % cfg.training.gradient_accumulate_every == 0:
                             self.optimizer.step()
-                            self.optimizer.zero_grad()
-                            lr_scheduler.step()
-
-                        # update ema
-                        if cfg.training.use_ema:
-                            ema.step(self.model)
+                            self.optimizer.zero_grad(set_to_none=True)
 
                         # logging
                         raw_loss_cpu = raw_loss.item()
@@ -206,44 +242,41 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 step_log['train_loss'] = train_loss
 
                 # ========= eval for this epoch ==========
-                policy = self.model
-                if cfg.training.use_ema:
-                    policy = self.ema_model
-                policy.eval()
+                self.policy.eval()
 
                 # run rollout
                 if (self.epoch % cfg.training.rollout_every) == 0:
-                    runner_log = env_runner.run(policy)
+                    runner_log, _ = env_runner.run(self.policy)
                     # log all
                     step_log.update(runner_log)
+                
+                # # run validation
+                # if (self.epoch % cfg.training.val_every) == 0:
+                #     with torch.no_grad():
+                #         val_losses = list()
+                #         with tqdm.tqdm(val_dataloader, desc=f"Validation epoch {self.epoch}", 
+                #                 leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
+                #             for batch_idx, batch in enumerate(tepoch):
+                #                 batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
+                #                 raw_loss = self.policy.compute_loss(batch)
+                #                 val_losses.append(raw_loss)
+                #                 if (cfg.training.max_val_steps is not None) \
+                #                     and batch_idx >= (cfg.training.max_val_steps-1):
+                #                     break
+                #         if len(val_losses) > 0:
+                #             val_loss = torch.mean(torch.tensor(val_losses)).item()
+                #             # log epoch average validation loss
+                #             step_log['val_loss'] = val_loss
 
-                # run validation
-                if (self.epoch % cfg.training.val_every) == 0:
-                    with torch.no_grad():
-                        val_losses = list()
-                        with tqdm.tqdm(val_dataloader, desc=f"Validation epoch {self.epoch}", 
-                                leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
-                            for batch_idx, batch in enumerate(tepoch):
-                                batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
-                                loss = self.model.compute_loss(batch)
-                                val_losses.append(loss)
-                                if (cfg.training.max_val_steps is not None) \
-                                    and batch_idx >= (cfg.training.max_val_steps-1):
-                                    break
-                        if len(val_losses) > 0:
-                            val_loss = torch.mean(torch.tensor(val_losses)).item()
-                            # log epoch average validation loss
-                            step_log['val_loss'] = val_loss
-            
-                # run diffusion sampling on a training batch
+                # run sample on a training batch
                 if (self.epoch % cfg.training.sample_every) == 0:
                     with torch.no_grad():
                         # sample trajectory from training set, and evaluate difference
-                        batch = dict_apply(train_sampling_batch, lambda x: x.to(device, non_blocking=True))
+                        batch = train_sampling_batch
                         obs_dict = {'obs': batch['obs']}
                         gt_action = batch['action']
                         
-                        result = policy.predict_action(obs_dict)
+                        result = self.policy.predict_action(obs_dict)
                         if cfg.pred_action_steps_only:
                             pred_action = result['action']
                             start = cfg.n_obs_steps - 1
@@ -252,7 +285,9 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                         else:
                             pred_action = result['action_pred']
                         mse = torch.nn.functional.mse_loss(pred_action, gt_action)
+                        # log
                         step_log['train_action_mse_error'] = mse.item()
+                        # release RAM
                         del batch
                         del obs_dict
                         del gt_action
@@ -282,7 +317,7 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                     if topk_ckpt_path is not None:
                         self.save_checkpoint(path=topk_ckpt_path)
                 # ========= eval end for this epoch ==========
-                policy.train()
+                self.policy.train()
 
                 # end of epoch
                 # log of last step is combined with validation and rollout
@@ -296,7 +331,7 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")), 
     config_name=pathlib.Path(__file__).stem)
 def main(cfg):
-    workspace = TrainDiffusionTransformerLowdimWorkspace(cfg)
+    workspace = PbrlBETLowdimWorkspace(cfg)
     workspace.run()
 
 if __name__ == "__main__":

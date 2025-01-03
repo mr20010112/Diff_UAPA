@@ -21,6 +21,7 @@ import numpy as np
 import shutil
 
 from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
+from diffusion_policy.model.common.lr_scheduler import get_scheduler
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 from diffusion_policy.policy.cpl_bet_lowdim_policy import BETLowdimPolicy
 from diffusion_policy.dataset.base_dataset import BaseLowdimDataset
@@ -69,12 +70,23 @@ class TrainBETLowdimWorkspace(BaseWorkspace):
             if lastest_ckpt_path.is_file():
                 print(f"Resuming from checkpoint {lastest_ckpt_path}")
                 self.load_checkpoint(path=lastest_ckpt_path)
+            self.optimizer = self.policy.get_optimizer(**cfg.optimizer)
+            self.global_step = 0
+            self.epoch = 0
+
+        device = torch.device(cfg.training.device_gpu)
+        ref_model = copy.deepcopy(self.policy)
+        # ref_model.double()
+        ref_model.eval() 
+        for param in ref_model.parameters():
+            param.requires_grad = False
+        ref_model.to(device)
 
         # configure dataset
         dataset: BaseLowdimDataset
-        dataset = hydra.utils.instantiate(cfg.task.dataset)
+        dataset = hydra.utils.instantiate(cfg.task.origin_dataset)
         assert isinstance(dataset, BaseLowdimDataset)
-        train_dataloader = DataLoader(dataset, **cfg.dataloader)
+        # train_dataloader = DataLoader(dataset, **cfg.dataloader)
 
         # configure validation dataset
         val_dataset = dataset.get_validation_dataset()
@@ -96,33 +108,66 @@ class TrainBETLowdimWorkspace(BaseWorkspace):
                 normalizer['action'].normalize(
                     dataset.get_all_actions()))
 
-        # configure env runner
-        env_runner: BaseLowdimRunner
-        env_runner = hydra.utils.instantiate(
-            cfg.task.env_runner,
-            output_dir=self.output_dir)
-        assert isinstance(env_runner, BaseLowdimRunner)
+        # configure dataset
+        dataset_1: BaseLowdimDataset
+        dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
+        #device = torch.device(cfg.training.device_cpu)
+        assert isinstance(dataset_1, BaseLowdimDataset)
 
-        # configure logging
-        wandb_run = wandb.init(
-            dir=str(self.output_dir),
-            config=OmegaConf.to_container(cfg, resolve=True),
-            **cfg.logging
-        )
-        wandb.config.update(
-            {
-                "output_dir": self.output_dir,
-            }
+
+        # configure dataset
+        dataset_2: BaseLowdimDataset
+        dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
+        # expert_normalizer = normal_dataset.get_normalizer()
+        assert isinstance(dataset_2, BaseLowdimDataset)
+
+        pref_dataset: BaseLowdimDataset
+        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset_1.replay_buffer, \
+                                               replay_buffer_2=dataset_2.replay_buffer) #cfg.task.perf_dataset
+
+        train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
+        del dataset, dataset_1, dataset_2
+
+        # configure lr scheduler
+        lr_scheduler = get_scheduler(
+            cfg.training.lr_scheduler,
+            optimizer=self.optimizer,
+            num_warmup_steps=cfg.training.lr_warmup_steps,
+            num_training_steps=(
+                len(train_dataloader) * cfg.training.num_epochs) \
+                    // cfg.training.gradient_accumulate_every,
+            # pytorch assumes stepping LRScheduler every epoch
+            # however huggingface diffusers steps it every batch
+            last_epoch=self.global_step-1
         )
 
-        # configure checkpoint
-        topk_manager = TopKCheckpointManager(
-            save_dir=os.path.join(self.output_dir, 'checkpoints'),
-            **cfg.checkpoint.topk
-        )
+        # # configure env runner
+        # env_runner: BaseLowdimRunner
+        # env_runner = hydra.utils.instantiate(
+        #     cfg.task.env_runner,
+        #     output_dir=self.output_dir)
+        # assert isinstance(env_runner, BaseLowdimRunner)
+
+        # # configure logging
+        # wandb_run = wandb.init(
+        #     dir=str(self.output_dir),
+        #     config=OmegaConf.to_container(cfg, resolve=True),
+        #     **cfg.logging
+        # )
+        # wandb.config.update(
+        #     {
+        #         "output_dir": self.output_dir,
+        #     }
+        # )
+
+        # # configure checkpoint
+        # topk_manager = TopKCheckpointManager(
+        #     save_dir=os.path.join(self.output_dir, 'checkpoints'),
+        #     **cfg.checkpoint.topk
+        # )
 
         # device transfer
-        device = torch.device(cfg.training.device)
+        device = torch.device(cfg.training.device_gpu)
         self.policy.to(device)
         optimizer_to(self.optimizer, device)
         
@@ -177,7 +222,8 @@ class TrainBETLowdimWorkspace(BaseWorkspace):
                             'global_step': self.global_step,
                             'epoch': self.epoch,
                             'train_loss_offset': loss_components['offset'].item(),
-                            'train_loss_class': loss_components['class'].item()
+                            'train_loss_class': loss_components['class'].item(),
+                            'lr': lr_scheduler.get_last_lr()[0]
                         }
 
                         is_last_batch = (batch_idx == (len(train_dataloader)-1))

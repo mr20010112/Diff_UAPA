@@ -58,7 +58,7 @@ origin_dataset:
 
 dataset_1:
   _target_: diffusion_policy.dataset.kitchen_hdf5_lowdim_dataset.KitchenHdf5LowdimDataset
-  dataset_dir: data/kitchen/Minari/normal/base_0.5/kitchen_data_0.5_complete.h5
+  dataset_dir: ${training.dataset_1_dir}
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1'}
   pad_after: ${eval:'${n_action_steps}-1'}
@@ -69,7 +69,7 @@ dataset_1:
 
 dataset_2:
   _target_: diffusion_policy.dataset.kitchen_hdf5_lowdim_dataset.KitchenHdf5LowdimDataset
-  dataset_dir: data/kitchen/Minari/normal/base_0.5/kitchen_data_0.5_complete.h5
+  dataset_dir: ${training.dataset_2_dir}
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1'}
   pad_after: ${eval:'${n_action_steps}-1'}
@@ -82,7 +82,7 @@ pref_dataset:
   _target_: diffusion_policy.dataset.rlhf_kitchen_lowdim_dataset.RLHF_KitchenLowdimDataset
   sequence_length: 280
   val_ratio: 0
-  N: 1000
+  N: 500
   gamma: ${gamma}
   gpu_device: ${training.device_gpu}
   save_dir: data/pref_data/kitchen

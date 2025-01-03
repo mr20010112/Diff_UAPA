@@ -43,8 +43,8 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
         if not abs_action:
             raise NotImplementedError()
 
-        episode_1_ends = replay_buffer_1.episode_ends
-        num_episodes_1 = len(episode_1_ends)
+        episode_ends_1 = replay_buffer_1.episode_ends
+        num_episodes_1 = len(episode_ends_1)
         episode_ends_2 = replay_buffer_2.episode_ends
         num_episodes_2 = len(episode_ends_2)
         self.pref_replay_buffer = PrefReplayBuffer.create_empty_numpy()
@@ -92,8 +92,8 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
                     votes = np.zeros((1,))
                     votes_2 = np.zeros((1,))
                 else:
-                    votes = np.sum([gamma ** t * reward for t, reward in enumerate(episode_1['reward'])])
-                    votes_2 = np.sum([gamma ** t * reward for t, reward in enumerate(episode_2['reward'])])
+                    votes = np.sum([(gamma ** t) * reward for t, reward in enumerate(episode_1['reward'])])
+                    votes_2 = np.sum([(gamma ** t) * reward for t, reward in enumerate(episode_2['reward'])])
                     # if np.abs(flag - flag_2) < 1e-6:
                     #     votes = np.array([0.5])
                     #     votes_2 = np.array([0.5])

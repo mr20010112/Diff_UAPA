@@ -2,7 +2,7 @@ import torch
 import dill
 import copy
 import os
-from diffusion_policy.policy.diffusion_transformer_lowdim_policy import DiffusionTransformerLowdimPolicy
+from diffusion_policy.policy.ours_diffusion_transformer_lowdim_policy import DiffusionTransformerLowdimPolicy
 
 # 假设 checkpoint 文件路径
 checkpoint_path = 'data/experiments/low_dim/kitchen/diffusion_policy_transformer/train_0/checkpoints/latest.ckpt'

@@ -95,6 +95,7 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
                 target_latents = torch.zeros_like(target_latents)
             criterion = FocalLoss(gamma=self.focal_loss_gamma)
         if self.predict_offsets:
+            # print(obs_rep._version)
             output, _ = self.model(obs_rep)
             logits = output[:, :, : self.vocab_size]
             offsets = output[:, :, self.vocab_size :]

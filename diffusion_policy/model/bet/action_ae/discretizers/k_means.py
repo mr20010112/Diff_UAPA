@@ -84,7 +84,7 @@ class KMeansDiscretizer(DictOfTensorMixin):
         ), "Input action dimension does not match fitted model"
 
         # flatten the input action
-        flattened_actions = input_action.view(-1, self.action_dim)
+        flattened_actions = input_action.contiguous().view(-1, self.action_dim)
 
         # get the closest cluster center
         closest_cluster_center = torch.argmin(

@@ -43,8 +43,8 @@ class RLHF_RobomimicReplayLowdimDataset(BaseLowdimDataset):
         if not abs_action:
             raise NotImplementedError()
 
-        episode_1_ends = replay_buffer_1.episode_ends
-        num_episodes_1 = len(episode_1_ends)
+        episode_ends_1 = replay_buffer_1.episode_ends
+        num_episodes_1 = len(episode_ends_1)
         episode_ends_2 = replay_buffer_2.episode_ends
         num_episodes_2 = len(episode_ends_2)
         self.pref_replay_buffer = PrefReplayBuffer.create_empty_numpy()
@@ -147,7 +147,7 @@ class RLHF_RobomimicReplayLowdimDataset(BaseLowdimDataset):
                         else:
                             group.create_dataset(sanitized_key, data=value)
 
-                with h5py.File(save_dir / 'kitchen_prefdata.h5', 'w') as f:
+                with h5py.File(save_dir / 'robomimic_prefdata.h5', 'w') as f:
                     recursively_store(f, save_data)
         else:
             with h5py.File(load_dir, 'r') as f:
