@@ -66,31 +66,27 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
 
         # resume training
         if cfg.training.resume:
-            lastest_ckpt_path = self.get_checkpoint_path()
-            if lastest_ckpt_path.is_file():
-                print(f"Resuming from checkpoint {lastest_ckpt_path}")
-                self.load_checkpoint(path=lastest_ckpt_path)
+            ckpt_path = pathlib.Path(cfg.checkpoint_dir)
+            if ckpt_path.is_file():
+                print(f"Resuming from checkpoint {ckpt_path}")
+                self.load_checkpoint(path=ckpt_path)
             self.optimizer = self.policy.get_optimizer(**cfg.optimizer)
             self.global_step = 0
             self.epoch = 0
 
         device = torch.device(cfg.training.device_gpu)
-        ref_model = copy.deepcopy(self.policy)
-        # ref_model.double()
-        ref_model.eval() 
-        for param in ref_model.parameters():
+        ref_policy = copy.deepcopy(self.policy)
+        # ref_policy.double()
+        ref_policy.eval() 
+        for param in ref_policy.parameters():
             param.requires_grad = False
-        ref_model.to(device)
+        ref_policy.to(device)
 
         # configure dataset
         dataset: BaseLowdimDataset
         dataset = hydra.utils.instantiate(cfg.task.origin_dataset)
         assert isinstance(dataset, BaseLowdimDataset)
         # train_dataloader = DataLoader(dataset, **cfg.dataloader)
-
-        # configure validation dataset
-        val_dataset = dataset.get_validation_dataset()
-        val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
 
         # set normalizer
         normalizer = None
@@ -111,14 +107,12 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         # configure dataset
         dataset_1: BaseLowdimDataset
         dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
-        #device = torch.device(cfg.training.device_cpu)
         assert isinstance(dataset_1, BaseLowdimDataset)
 
 
         # configure dataset
         dataset_2: BaseLowdimDataset
         dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
-        # expert_normalizer = normal_dataset.get_normalizer()
         assert isinstance(dataset_2, BaseLowdimDataset)
 
         pref_dataset: BaseLowdimDataset
@@ -127,6 +121,9 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset, dataset_1, dataset_2
+
+        val_dataset = pref_dataset.get_validation_dataset()
+        val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
 
         # configure lr scheduler
         lr_scheduler = get_scheduler(
@@ -141,30 +138,30 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
             last_epoch=self.global_step-1
         )
 
-        # # configure env runner
-        # env_runner: BaseLowdimRunner
-        # env_runner = hydra.utils.instantiate(
-        #     cfg.task.env_runner,
-        #     output_dir=self.output_dir)
-        # assert isinstance(env_runner, BaseLowdimRunner)
+        # configure env runner
+        env_runner: BaseLowdimRunner
+        env_runner = hydra.utils.instantiate(
+            cfg.task.env_runner,
+            output_dir=self.output_dir)
+        assert isinstance(env_runner, BaseLowdimRunner)
 
-        # # configure logging
-        # wandb_run = wandb.init(
-        #     dir=str(self.output_dir),
-        #     config=OmegaConf.to_container(cfg, resolve=True),
-        #     **cfg.logging
-        # )
-        # wandb.config.update(
-        #     {
-        #         "output_dir": self.output_dir,
-        #     }
-        # )
+        # configure logging
+        wandb_run = wandb.init(
+            dir=str(self.output_dir),
+            config=OmegaConf.to_container(cfg, resolve=True),
+            **cfg.logging
+        )
+        wandb.config.update(
+            {
+                "output_dir": self.output_dir,
+            }
+        )
 
-        # # configure checkpoint
-        # topk_manager = TopKCheckpointManager(
-        #     save_dir=os.path.join(self.output_dir, 'checkpoints'),
-        #     **cfg.checkpoint.topk
-        # )
+        # configure checkpoint
+        topk_manager = TopKCheckpointManager(
+            save_dir=os.path.join(self.output_dir, 'checkpoints'),
+            **cfg.checkpoint.topk
+        )
 
         # device transfer
         device = torch.device(cfg.training.device_gpu)
@@ -199,10 +196,10 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                             train_sampling_batch = batch
 
                         # compute loss
-                        torch.autograd.set_detect_anomaly(True)
-                        raw_loss = self.policy.compute_loss(batch)
+                        # torch.autograd.set_detect_anomaly(True)
+                        raw_loss = self.policy.compute_loss(batch, ref_policy=ref_policy)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
-                        loss.backward(retain_graph=True)
+                        loss.backward()
 
                         # clip grad norm
                         torch.nn.utils.clip_grad_norm_(
@@ -213,6 +210,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                         if self.global_step % cfg.training.gradient_accumulate_every == 0:
                             self.optimizer.step()
                             self.optimizer.zero_grad(set_to_none=True)
+                            lr_scheduler.step()
 
                         # logging
                         raw_loss_cpu = raw_loss.item()
@@ -246,27 +244,27 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
 
                 # run rollout
                 if (self.epoch % cfg.training.rollout_every) == 0:
-                    runner_log, _ = env_runner.run(self.policy)
+                    runner_log = env_runner.run(self.policy)
                     # log all
                     step_log.update(runner_log)
                 
-                # # run validation
-                # if (self.epoch % cfg.training.val_every) == 0:
-                #     with torch.no_grad():
-                #         val_losses = list()
-                #         with tqdm.tqdm(val_dataloader, desc=f"Validation epoch {self.epoch}", 
-                #                 leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
-                #             for batch_idx, batch in enumerate(tepoch):
-                #                 batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
-                #                 raw_loss = self.policy.compute_loss(batch)
-                #                 val_losses.append(raw_loss)
-                #                 if (cfg.training.max_val_steps is not None) \
-                #                     and batch_idx >= (cfg.training.max_val_steps-1):
-                #                     break
-                #         if len(val_losses) > 0:
-                #             val_loss = torch.mean(torch.tensor(val_losses)).item()
-                #             # log epoch average validation loss
-                #             step_log['val_loss'] = val_loss
+                # run validation
+                if (self.epoch % cfg.training.val_every) == 0:
+                    with torch.no_grad():
+                        val_losses = list()
+                        with tqdm.tqdm(val_dataloader, desc=f"Validation epoch {self.epoch}", 
+                                leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
+                            for batch_idx, batch in enumerate(tepoch):
+                                batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
+                                raw_loss = self.policy.compute_loss(batch)
+                                val_losses.append(raw_loss)
+                                if (cfg.training.max_val_steps is not None) \
+                                    and batch_idx >= (cfg.training.max_val_steps-1):
+                                    break
+                        if len(val_losses) > 0:
+                            val_loss = torch.mean(torch.tensor(val_losses)).item()
+                            # log epoch average validation loss
+                            step_log['val_loss'] = val_loss
 
                 # run sample on a training batch
                 if (self.epoch % cfg.training.sample_every) == 0:
@@ -284,7 +282,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                             gt_action = gt_action[:,start:end]
                         else:
                             pred_action = result['action_pred']
-                        mse = torch.nn.functional.mse_loss(pred_action, gt_action)
+                        mse = torch.nn.functional.mse_loss(pred_action, gt_action[:, :pred_action.shape[1], ...])
                         # log
                         step_log['train_action_mse_error'] = mse.item()
                         # release RAM

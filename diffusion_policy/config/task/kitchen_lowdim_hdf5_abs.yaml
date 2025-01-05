@@ -26,25 +26,6 @@ env_runner:
   robot_noise_ratio: ${task.robot_noise_ratio}
   n_envs: null
 
-test_env_runner:
-  _target_: diffusion_policy.env_runner.kitchen_lowdim_runner.KitchenLowdimRunner
-  dataset_dir: data/kitchen
-  n_train: ${task.env_runner.n_train}
-  n_train_vis: ${task.env_runner.n_train_vis}
-  train_start_seed: ${task.env_runner.train_start_seed}
-  n_test: ${task.env_runner.n_test}
-  n_test_vis: ${task.env_runner.n_test_vis}
-  test_start_seed: ${task.env_runner.test_start_seed}
-  max_steps: ${task.env_runner.max_steps}
-  n_obs_steps: ${n_obs_steps}
-  n_action_steps: ${n_obs_steps}
-  render_hw: ${task.env_runner.render_hw}
-  fps: ${task.env_runner.fps}
-  past_action: ${past_action_visible}
-  abs_action: ${task.abs_action}
-  robot_noise_ratio: ${task.robot_noise_ratio}
-  n_envs: ${task.env_runner.n_envs}
-
 origin_dataset:
   _target_: diffusion_policy.dataset.kitchen_mjl_lowdim_dataset.KitchenMjlLowdimDataset
   dataset_dir: data/kitchen/kitchen_demos_multitask

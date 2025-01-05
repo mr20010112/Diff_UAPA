@@ -39,7 +39,7 @@ from diffusion_policy.common.compute_all_loss import compute_all_traj_loss
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 # %%
-class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
+class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
     include_keys = ['global_step', 'epoch']
 
     def __init__(self, cfg: OmegaConf):
@@ -118,10 +118,6 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset, dataset_1, dataset_2
 
-        # # configure validation dataset
-        # val_dataset = pref_dataset.get_validation_dataset()
-        # val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
-
         self.model.set_normalizer(normalizer)
         if cfg.training.use_ema:
             # self.ema_model.double()
@@ -142,38 +138,38 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             last_epoch=self.global_step-1,
         )
 
-        # configure ema
-        ema: EMAModel = None
-        if cfg.training.use_ema:
-            ema = hydra.utils.instantiate(
-                cfg.ema,
-                model=self.ema_model)
+        # # configure ema
+        # ema: EMAModel = None
+        # if cfg.training.use_ema:
+        #     ema = hydra.utils.instantiate(
+        #         cfg.ema,
+        #         model=self.ema_model)
 
-        # configure env runner
-        env_runner: BaseLowdimRunner
-        env_runner = hydra.utils.instantiate(
-            cfg.task.env_runner,
-            output_dir=self.output_dir)
-        assert isinstance(env_runner, BaseLowdimRunner)
+        # # configure env runner
+        # env_runner: BaseLowdimRunner
+        # env_runner = hydra.utils.instantiate(
+        #     cfg.task.env_runner,
+        #     output_dir=self.output_dir)
+        # assert isinstance(env_runner, BaseLowdimRunner)
 
-        # configure logging
-        wandb_run = wandb.init(
-            dir=str(self.output_dir),
-            config=OmegaConf.to_container(cfg, resolve=True),
-            **cfg.logging
-        )
-        wandb.config.update(
-            {
-                "output_dir": self.output_dir,
-                "timeout": 300,
-            }
-        )
+        # # configure logging
+        # wandb_run = wandb.init(
+        #     dir=str(self.output_dir),
+        #     config=OmegaConf.to_container(cfg, resolve=True),
+        #     **cfg.logging
+        # )
+        # wandb.config.update(
+        #     {
+        #         "output_dir": self.output_dir,
+        #         "timeout": 300,
+        #     }
+        # )
 
-        # configure checkpoint
-        topk_manager = TopKCheckpointManager(
-            save_dir=os.path.join(self.output_dir, 'checkpoints'),
-            **cfg.checkpoint.topk
-        )
+        # # configure checkpoint
+        # topk_manager = TopKCheckpointManager(
+        #     save_dir=os.path.join(self.output_dir, 'checkpoints'),
+        #     **cfg.checkpoint.topk
+        # )
 
         # device transfer
         device = torch.device(cfg.training.device_gpu)
@@ -206,8 +202,6 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 if self.ema_model is not None:
                     self.ema_model.train()
                 train_losses = list()
-                # map_loss = []
-                # avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, model = self.model, ref_model = ref_model)
                 with tqdm.tqdm(train_dataloader, desc=f"Training epoch {self.epoch}", 
                         leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
                     for batch_idx, batch in enumerate(tepoch):
@@ -218,7 +212,7 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
                         # compute loss
                         avg_traj_loss = 0.0
-                        if cfg.training.map.use_map and (not cfg.training.map.map_batch_update):
+                        if cfg.training.map.use_map:
                             avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, model = self.model, ref_model = ref_model)
                         raw_loss = self.model.compute_loss(batch, ref_model=ref_model, avg_traj_loss = avg_traj_loss)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
@@ -269,7 +263,7 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
                 # run rollout
                 if (self.epoch % cfg.training.rollout_every) == 0:
-                    runner_log, _ = env_runner.run(policy)
+                    runner_log = env_runner.run(policy)
                     # log all
                     step_log.update(runner_log)
 

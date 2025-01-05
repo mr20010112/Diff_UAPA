@@ -239,15 +239,20 @@ class BETLowdimPolicy(BaseLowdimPolicy):
                 target_latents=latent_1,
             )
 
+            ref_loss_1 = ref_policy.get_pred_loss(
+                obs_rep=enc_obs_1.clone(),
+                target_latents=latent_1,
+            ).detach()
+
             # _, loss_1 = self.state_prior.get_latent_and_loss(
             #     obs_rep=enc_obs_1.clone(),
             #     target_latents=latent_1,
             # )
 
             #traj_loss_1 += -torch.norm(action_1_slide-pred_action_1['action'], dim=-1)*(self.gamma ** (i*self.n_action_steps + torch.arange(0, self.n_action_steps, device=self.device))).reshape(1,-1)
-            traj_loss_1 = traj_loss_1 - ((loss_1)*torch.tensor(self.gamma**(i*self.horizon), device=self.device))
+            traj_loss_1 = traj_loss_1 - ((loss_1 - ref_loss_1)*torch.tensor(self.gamma**(i*self.horizon), device=self.device))
             immatation_loss_1 = immatation_loss_1 + loss_1
-            
+
             obs_2_slide = obs_2[i]
             obs_2_slide[:,To:,:] = -2
             action_2_slide = action_2[i]
@@ -260,13 +265,18 @@ class BETLowdimPolicy(BaseLowdimPolicy):
                 target_latents=latent_2,
             )
 
+            ref_loss_2 = ref_policy.get_pred_loss(
+                obs_rep=enc_obs_2.clone(),
+                target_latents=latent_2,
+            ).detach()
+
             # _, loss_2 = self.state_prior.get_latent_and_loss(
             #     obs_rep=enc_obs_2.clone(),
             #     target_latents=latent_2,
             # )
 
             #traj_loss_2 += -torch.norm(action_2_slide-pred_action_2['action'], dim=-1)*(self.gamma ** (i*self.n_action_steps + torch.arange(0, self.n_action_steps, device=self.device))).reshape(1,-1)
-            traj_loss_2 = traj_loss_2 - ((loss_2)*torch.tensor(self.gamma**(i*self.horizon), device=self.device))
+            traj_loss_2 = traj_loss_2 - ((loss_2 - ref_loss_2)*torch.tensor(self.gamma**(i*self.horizon), device=self.device))
             immatation_loss_2 = immatation_loss_2 + loss_2
 
         # traj_loss_1 = torch.sum(traj_loss_1, dim=-1)
@@ -274,8 +284,8 @@ class BETLowdimPolicy(BaseLowdimPolicy):
         delta_loss = torch.abs(traj_loss_1 - traj_loss_2)
         mean_delta_loss = torch.mean(delta_loss)
 
-        mle_loss_1 = -F.logsigmoid(self.beta*(traj_loss_1 - traj_loss_2)) + immatation_loss_1/(2*len(obs_1)*self.n_obs_steps) + immatation_loss_2/(2*len(obs_2)*self.n_obs_steps) #-F.logsigmoid(self.beta*(traj_loss_1 - traj_loss_2))
-        mle_loss_2 = -F.logsigmoid(self.beta*(traj_loss_2 - traj_loss_1)) + immatation_loss_1/(2*len(obs_1)*self.n_obs_steps) + immatation_loss_2/(2*len(obs_2)*self.n_obs_steps) #-F.logsigmoid(self.beta*(traj_loss_2 - traj_loss_1))
+        mle_loss_1 = -F.logsigmoid(self.beta*(traj_loss_1 - traj_loss_2)) + immatation_loss_1/(2*len(obs_1)*self.n_obs_steps) + immatation_loss_2/(2*len(obs_2)*self.n_obs_steps)
+        mle_loss_2 = -F.logsigmoid(self.beta*(traj_loss_2 - traj_loss_1)) + immatation_loss_1/(2*len(obs_1)*self.n_obs_steps) + immatation_loss_2/(2*len(obs_2)*self.n_obs_steps)
 
         loss = (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2)
 

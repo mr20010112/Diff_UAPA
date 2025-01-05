@@ -152,18 +152,18 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 all_votes_1[local_epoch_idx] = np.maximum(all_votes_1[local_epoch_idx], 0)
                 all_votes_2[local_epoch_idx] = np.maximum(all_votes_2[local_epoch_idx], 0)
     
-        init_votes_1 = np.sum(all_votes_1, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
-        init_votes_2 = np.sum(all_votes_2, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
+        # init_votes_1 = np.sum(all_votes_1, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
+        # init_votes_2 = np.sum(all_votes_2, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
 
-        pref_dataset.pref_replay_buffer.meta['votes'] = init_votes_1.reshape(-1, 1)
-        pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2.reshape(-1, 1)
-        pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
-        pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
+        # pref_dataset.pref_replay_buffer.meta['votes'] = init_votes_1.reshape(-1, 1)
+        # pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2.reshape(-1, 1)
+        # pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
+        # pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
 
-        if cfg.training.map.use_map:
-            pref_dataset.set_beta_priori(data_size=150)
-            pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=40, warm_up_epochs=5, batch_size=5, lr=1.0e-5)
-            pref_dataset.update_beta_priori()
+        # if cfg.training.map.use_map:
+        #     pref_dataset.set_beta_priori(data_size=150)
+        #     pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=40, warm_up_epochs=5, batch_size=5, lr=1.0e-5)
+        #     pref_dataset.update_beta_priori()
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset, expert_dataset, normal_dataset
@@ -186,13 +186,6 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             cfg.task.env_runner,
             output_dir=self.output_dir)
         assert isinstance(env_runner, BaseLowdimRunner)
-
-        # # configure test-env runner
-        # test_env_runner: BaseLowdimRunner
-        # test_env_runner = hydra.utils.instantiate(
-        #     cfg.task.test_env_runner,
-        #     output_dir=self.output_dir)
-        # assert isinstance(test_env_runner, BaseLowdimRunner)
 
         # configure logging
         wandb_run = wandb.init(
@@ -240,16 +233,19 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             for online_epoch_idx in range(cfg.training.online.num_groups):
                 print(f"Round {online_epoch_idx + 1} of {cfg.training.online.num_groups} for online training")
                     
-                # if online_epoch_idx > 0:
-                #     if cfg.training.map.use_map:
-                #         ref_policy = comp_policy(self, ref_policy = ref_policy, target_policy = self.model, env = test_env_runner, beta_model = pref_dataset.beta_model)
-                #     else:
-                #         ref_policy = copy.deepcopy(self.model)
+                init_votes_1 = np.sum(all_votes_1[:online_epoch_idx+1], axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5) * (cfg.training.online.num_groups / (online_epoch_idx + 1))
+                init_votes_2 = np.sum(all_votes_2[:online_epoch_idx+1], axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5) * (cfg.training.online.num_groups / (online_epoch_idx + 1))  
 
-                #     ref_policy.eval() 
-                #     for param in ref_policy.parameters():
-                #         param.requires_grad = False
-                #     ref_policy.to(device)
+                pref_dataset.pref_replay_buffer.meta['votes'] = init_votes_1.reshape(-1, 1)
+                pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2.reshape(-1, 1)
+                pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
+                pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
+
+                pref_dataset.set_beta_priori(data_size=150)
+                pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=40, warm_up_epochs=5, batch_size=5, lr=1.0e-5)
+                pref_dataset.update_beta_priori()
+
+                self.model.map_ratio = (online_epoch_idx + 1) * cfg.training.online.map_ratio / (cfg.training.online.num_groups)
 
                 if not cfg.training.online.update_history:
                     local_votes_1 = np.array(all_votes_1[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \
@@ -300,7 +296,7 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
                             # compute loss
                             avg_traj_loss = 0.0
-                            if cfg.training.map.use_map and (not cfg.training.map.map_batch_update):
+                            if cfg.training.map.use_map:
                                 avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
                                                                       model = self.model, ref_model = ref_policy.model)
                             raw_loss = self.model.compute_loss(batch, ref_model=ref_policy.model, avg_traj_loss = avg_traj_loss)

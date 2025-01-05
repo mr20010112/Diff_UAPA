@@ -22,7 +22,7 @@ obs_as_cond: True
 pred_action_steps_only: False
 
 policy: 
-  _target_: diffusion_policy.policy.ours_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy
+  _target_: diffusion_policy.policy.dpo_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy
 
   model: 
     _target_: diffusion_policy.model.diffusion.transformer_for_diffusion.TransformerForDiffusion
@@ -57,7 +57,6 @@ policy:
   beta: 0.00357
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
-  map_batch_update: ${training.map.map_batch_update}
   bias_reg: 0.25
   train_time_samples: 1
   horizon: ${horizon}
@@ -81,14 +80,14 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 35
+  batch_size: 32
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 35
+  batch_size: 32
   num_workers: 1
   shuffle: True
   pin_memory: True
@@ -125,11 +124,10 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
-  dataset_1_dir: 'data/kitchen/Minari/normal/base_0.5/kitchen_data_0.5_complete.h5'
-  dataset_2_dir: 'data/kitchen/Minari/normal/base_0.5/kitchen_data_0.5_complete.h5'
+  dataset_1_dir: 'data/kitchen/Minari/normal/base_0.5/kitchen_data_0.5.h5'
+  dataset_2_dir: 'data/kitchen/Minari/normal/base_0.5/kitchen_data_0.5.h5'
   map:
     use_map: False
-    map_batch_update: False
     map_ratio: 0.25
 
 

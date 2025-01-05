@@ -97,8 +97,8 @@ class BatchFocalLoss(nn.Module):
 
     def forward(self, x: Tensor, y: Tensor) -> Tensor:
         batch_size, sequence_length = x.shape[:2]
-        x = x.reshape(-1, *x.shape[2:])
-        y = y.reshape(-1, *x.shape[2:])
+        x = x.view(-1, x.size(-1))
+        y = y.view(-1)
         if x.ndim > 2:
             # (N, C, d1, d2, ..., dK) --> (N * d1 * ... * dK, C)
             c = x.shape[1]

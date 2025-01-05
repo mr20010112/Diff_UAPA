@@ -3,7 +3,7 @@ defaults:
   - task: kitchen_lowdim_hdf5_abs #kitchen_lowdim_abs
 
 name: train_diffusion_transformer_lowdim
-_target_: diffusion_policy.workspace.train_diffusion_transformer_lowdim_online_workspace.TrainDiffusionTransformerLowdimWorkspace
+_target_: diffusion_policy.workspace.train_diffusion_transformer_lowdim_online_type2_workspace.TrainDiffusionTransformerLowdimWorkspace
 checkpoint_dir: 'data/experiments/low_dim/kitchen/diffusion_policy_transformer/base_0.5/seed=42.ckpt'
 
 obs_dim: ${task.obs_dim}
@@ -57,7 +57,6 @@ policy:
   beta: 0.00357
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
-  map_batch_update: ${training.map.map_batch_update}
   bias_reg: 0.25
   train_time_samples: 2
   horizon: ${horizon}
@@ -134,7 +133,6 @@ training:
     update_history: False
   map:
     use_map: True
-    map_batch_update: False
     map_ratio: 0.25
 
 

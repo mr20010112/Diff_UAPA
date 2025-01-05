@@ -273,7 +273,8 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
                 leave=False, mininterval=self.tqdm_interval_sec)
 
             done = False
-            while not done:
+            all_done = [False] * n_envs
+            while not all_done:
                 # create obs dict
                 np_obs_dict = {
                     # handle n_latency_steps by discarding the last n_latency_steps

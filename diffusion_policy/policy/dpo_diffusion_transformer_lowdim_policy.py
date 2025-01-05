@@ -261,7 +261,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         for _ in range(self.train_time_samples[0]):
             timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=self.device).long()
 
-            traj_loss_1, traj_loss_2, avg_traj_loss = 0, 0, save_avg_traj_loss
+            traj_loss_1, traj_loss_2, immitation_loss, avg_traj_loss = 0, 0, 0, save_avg_traj_loss
             # mseloss_1, mseloss_2 = 0, 0
             condition_mask = []
 
@@ -293,11 +293,11 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 pred_type_1 = self.noise_scheduler.config.prediction_type
                 target = noise_1 if pred_type_1 == 'epsilon' else trajectory_1
 
-                slice_loss_1 = torch.norm((pred_1 - noise_1) * loss_mask_1.type(pred_1.dtype), dim=-1) ** 2 \
-                            - torch.norm((ref_pred_1 - noise_1) * loss_mask_1.type(ref_pred_1.dtype), dim=-1) ** 2
+                slice_loss_1 = torch.norm((pred_1 - noise_1) * loss_mask_1.type(pred_1.dtype), dim=-1) ** 2 
                 # slice_loss_1 = F.mse_loss(pred_1 * loss_mask_1.type(pred_1.dtype), target * loss_mask_1.type(target.dtype), reduction='none')
 
-                traj_loss_1 += (slice_loss_1) * (self.gamma ** (i*self.n_action_steps + torch.arange(0, self.n_action_steps, device=self.device))).reshape(1, -1)
+                traj_loss_1 += slice_loss_1
+                immitation_loss += slice_loss_1
 
             for i in range(len(obs_2)):
                 obs_2_slide = obs_2[i]
@@ -326,24 +326,27 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 pred_type_2 = self.noise_scheduler.config.prediction_type
                 target = noise_2 if pred_type_2 == 'epsilon' else trajectory_2
 
-                slice_loss_2 = torch.norm((pred_2 - noise_2) * loss_mask_2.type(pred_2.dtype), dim=-1) ** 2 \
-                            - torch.norm((ref_pred_2 - noise_2) * loss_mask_2.type(ref_pred_2.dtype), dim=-1) ** 2
+                slice_loss_2 = torch.norm((pred_2 - noise_2) * loss_mask_2.type(pred_2.dtype), dim=-1) ** 2 
                 # slice_loss_2 = F.mse_loss(pred_2 * loss_mask_2.type(pred_2.dtype), target * loss_mask_2.type(target.dtype), reduction='none')
 
-                traj_loss_2 += (slice_loss_2) * (self.gamma ** (i*self.n_action_steps + torch.arange(0, self.n_action_steps, device=self.device))).reshape(1, -1)
+                traj_loss_2 += slice_loss_2
+                immitation_loss += slice_loss_2
 
 
             traj_loss_1 = torch.sum(traj_loss_1, dim=-1)
             traj_loss_2 = torch.sum(traj_loss_2, dim=-1)
+            immitation_loss = torch.sum(immitation_loss, dim=-1)
+
 
             # term = torch.ones(timesteps.shape, device=self.device)
 
             traj_loss_1 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_1
             traj_loss_2 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_2
             avg_traj_loss = -self.beta * self.noise_scheduler.config.num_train_timesteps * avg_traj_loss
+            immitation_loss = -self.beta * immitation_loss
 
-            mle_loss_1 = -F.logsigmoid(traj_loss_1 - self.bias_reg*traj_loss_2)
-            mle_loss_2 = -F.logsigmoid(traj_loss_2 - self.bias_reg*traj_loss_1)
+            mle_loss_1 = -F.logsigmoid(traj_loss_1 - traj_loss_2 + immitation_loss)
+            mle_loss_2 = -F.logsigmoid(traj_loss_2 - traj_loss_1 + immitation_loss)
 
 
             loss += (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2) / (2 * self.train_time_samples[0]) 

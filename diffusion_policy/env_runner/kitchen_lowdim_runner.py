@@ -208,21 +208,17 @@ class KitchenLowdimRunner(BaseLowdimRunner):
         all_rewards = [None] * n_inits
         last_info = [None] * n_inits
 
-        # initialize lists to collect data
-        observations, actions, rewards, terminals = [[] for _ in range(n_envs)], [[] for _ in range(n_envs)], \
-        [[] for _ in range(n_envs)], [[] for _ in range(n_envs)]
-
         for chunk_idx in range(n_chunks):
             start = chunk_idx * n_envs
             end = min(n_inits, start + n_envs)
             this_global_slice = slice(start, end)
             this_n_active_envs = end - start
-            this_local_slice = slice(0, this_n_active_envs)
+            this_local_slice = slice(0,this_n_active_envs)
             
             this_init_fns = self.env_init_fn_dills[this_global_slice]
             n_diff = n_envs - len(this_init_fns)
             if n_diff > 0:
-                this_init_fns.extend([self.env_init_fn_dills[0]] * n_diff)
+                this_init_fns.extend([self.env_init_fn_dills[0]]*n_diff)
             assert len(this_init_fns) == n_envs
 
             # init envs
@@ -234,82 +230,63 @@ class KitchenLowdimRunner(BaseLowdimRunner):
             past_action = None
             policy.reset()
 
-            for i in range(n_envs):
-                observations[i].extend(obs[i, ...])
-
             pbar = tqdm.tqdm(total=self.max_steps, desc=f"Eval BlockPushLowdimRunner {chunk_idx+1}/{n_chunks}", 
                 leave=False, mininterval=self.tqdm_interval_sec)
-            all_done = False
-            while not all_done:
+            done = False
+            while not done:
                 # create obs dict
                 np_obs_dict = {
                     'obs': obs.astype(np.float32)
                 }
                 if self.past_action and (past_action is not None):
-                    np_obs_dict['past_action'] = past_action[:, -(self.n_obs_steps-1):].astype(np.float32)
-                
+                    # TODO: not tested
+                    np_obs_dict['past_action'] = past_action[
+                        :,-(self.n_obs_steps-1):].astype(np.float32)
                 # device transfer
-                obs_dict = dict_apply(np_obs_dict, lambda x: torch.from_numpy(x).to(device=device))
+                obs_dict = dict_apply(np_obs_dict, 
+                    lambda x: torch.from_numpy(x).to(
+                        device=device))
 
                 # run policy
                 with torch.no_grad():
                     action_dict = policy.predict_action(obs_dict)
 
                 # device_transfer
-                np_action_dict = dict_apply(action_dict, lambda x: x.detach().to('cpu').numpy())
+                np_action_dict = dict_apply(action_dict,
+                    lambda x: x.detach().to('cpu').numpy())
+
                 action = np_action_dict['action']
 
                 # step env
-                obs, reward, done, info = env.step(action[:, :self.n_action_steps, ...])
-                all_done = np.all(done)
-                past_action = action[:, :self.n_action_steps, ...]
+                obs, reward, done, info = env.step(action)
+                done = np.all(done)
+                past_action = action
 
-                # collect data
-                for i in range(n_envs):
-                    if not all_done:
-                        observations[i].extend(obs[i, ...])
-                    actions[i].extend(action[i, :self.n_action_steps, ...])
-                    # rewards[i].extend([reward[i]] * len(obs[i, ...]))
-                    if not done[i]:
-                        terminals[i].extend([False] * len(obs[i, ...]))
-                    else:
-                        terminals[i].extend([False] * (len(obs[i, ...])-1) + [True])
-                    
                 # update pbar
-                # pbar.update(action.shape[1])
-                pbar.update(self.n_action_steps)
+                pbar.update(action.shape[1])
             pbar.close()
-
-
 
             # collect data for this round
             all_video_paths[this_global_slice] = env.render()[this_local_slice]
             all_rewards[this_global_slice] = env.call('get_attr', 'reward')[this_local_slice]
             last_info[this_global_slice] = [dict((k,v[-1]) for k, v in x.items()) for x in info][this_local_slice]
 
-            for i in range(n_envs):
-                episode_reward = np.array(all_rewards[i])
-                indices = np.argwhere(episode_reward == 1.0).flatten()  # 提取一维索引
-                if indices.size == 0:  # 没有找到值为1的索引
-                    rewards[i].extend([0.0] * len(episode_reward))
-                else:
-                    prev_index = 0
-                    for j, idx in enumerate(indices):
-                        rewards[i].extend([1.0 / (idx - prev_index)] * (idx - prev_index))
-                        prev_index = idx  # 更新上一索引
-                    
-                    rewards[i].extend([0.0] * (len(episode_reward) - prev_index))
-
-
         # reward is number of tasks completed, max 7
         # use info to record the order of task completion?
-        # also report the probability of completing n tasks (different aggregation of reward).
+        # also report the probably to completing n tasks (different aggregation of reward).
 
         # log
         log_data = dict()
         prefix_total_reward_map = collections.defaultdict(list)
         prefix_n_completed_map = collections.defaultdict(list)
-        
+        # results reported in the paper are generated using the commented out line below
+        # which will only report and average metrics from first n_envs initial condition and seeds
+        # fortunately this won't invalidate our conclusion since
+        # 1. This bug only affects the variance of metrics, not their mean
+        # 2. All baseline methods are evaluated using the same code
+        # to completely reproduce reported numbers, uncomment this line:
+        # for i in range(len(self.env_fns)):
+        # and comment out this line
         for i in range(n_inits):
             seed = self.env_seeds[i]
             prefix = self.env_prefixs[i]
@@ -328,10 +305,9 @@ class KitchenLowdimRunner(BaseLowdimRunner):
 
         # log aggregate metrics
         for prefix, value in prefix_total_reward_map.items():
-            name = prefix + 'mean_score'
+            name = prefix+'mean_score'
             value = np.mean(value)
             log_data[name] = value
-
         for prefix, value in prefix_n_completed_map.items():
             n_completed = np.array(value)
             for i in range(7):
@@ -340,13 +316,4 @@ class KitchenLowdimRunner(BaseLowdimRunner):
                 name = prefix + f'p_{n}'
                 log_data[name] = p_n
 
-        episode_data = {
-            'observations': np.array(observations),
-            'actions': np.array(actions),
-            'rewards': np.array(rewards),
-            'terminals': np.array(terminals),
-        }
-
-
-        # Return the data in the desired format (2D arrays: time x feature dimension)
-        return log_data, episode_data
+        return log_data

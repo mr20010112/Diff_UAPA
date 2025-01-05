@@ -4,7 +4,7 @@ defaults:
 
 name: train_bet_lowdim
 _target_: diffusion_policy.workspace.pbrl_bet_lowdim_workspace.PbrlBETLowdimWorkspace
-checkpoint_dir: 'data/experiments/low_dim/kitchen/bet/base/epoch=0045-test_mean_score=0.429.ckpt'
+checkpoint_dir: 'data/experiments/low_dim/kitchen/bet/base/epoch=0050-test_mean_score=0.414.ckpt'
 
 obs_dim: ${task.obs_dim}
 action_dim: ${task.action_dim}
@@ -24,11 +24,11 @@ obs_as_global_cond: False
 pred_action_steps_only: False
 
 policy:
-  _target_: diffusion_policy.policy.cpl_bet_lowdim_policy.BETLowdimPolicy
+  _target_: diffusion_policy.policy.dpo_bet_lowdim_policy.BETLowdimPolicy
 
   action_ae:
     _target_: diffusion_policy.model.bet.action_ae.discretizers.k_means.KMeansDiscretizer
-    num_bins: 24
+    num_bins: 64
     action_dim: ${action_dim}
     predict_offsets: True
   
@@ -56,7 +56,7 @@ policy:
     action_dim: ${action_dim}
 
   gamma: ${gamma}
-  beta: 0.00714
+  beta: 1 #cpl 0.5 #dpo 1
   horizon: ${horizon}
   n_obs_steps: ${n_obs_steps}
   n_action_steps: ${n_action_steps}
@@ -76,8 +76,8 @@ val_dataloader:
   persistent_workers: False
 
 optimizer:
-  learning_rate: 5e-5 # 1e-4
-  weight_decay: 0.05
+  learning_rate: 1e-6 # 1e-4
+  weight_decay: 0.01
   betas: [0.9, 0.99]
 
 training:

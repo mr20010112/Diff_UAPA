@@ -34,7 +34,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             obs_as_cond=False,
             pred_action_steps_only=False,
             use_map=False,
-            map_batch_update=False,
             beta=1.0,
             map_ratio=1.0,
             bias_reg=1.0,
@@ -66,7 +65,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         self.gamma = gamma
         self.beta = beta
         self.use_map = use_map
-        self.map_batch_update = map_batch_update
         self.map_ratio = map_ratio
         self.bias_reg = bias_reg
         self.kwargs = kwargs
@@ -333,10 +331,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
 
             traj_loss_1 = torch.sum(traj_loss_1, dim=-1)
             traj_loss_2 = torch.sum(traj_loss_2, dim=-1)
-
-            #batch size update
-            if self.use_map and self.map_batch_update:
-                avg_traj_loss = (torch.mean(traj_loss_1, dim=-1) + torch.mean(traj_loss_2, dim=-1)) / 2
 
             # term = torch.ones(timesteps.shape, device=self.device)
 
