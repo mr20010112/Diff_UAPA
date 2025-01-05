@@ -67,16 +67,20 @@ class TrainRobomimicLowdimWorkspace(BaseWorkspace):
         normalizer = dataset.get_normalizer()
         del dataset
 
-        expert_dataset: BaseLowdimDataset
-        expert_dataset = hydra.utils.instantiate(cfg.task.expert_dataset)
-        assert isinstance(expert_dataset, BaseLowdimDataset)
+        # configure dataset
+        dataset_1: BaseLowdimDataset
+        dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
+        assert isinstance(dataset_1, BaseLowdimDataset)
 
-        normal_dataset: BaseLowdimDataset
-        normal_dataset = hydra.utils.instantiate(cfg.task.normal_dataset)
-        assert isinstance(normal_dataset, BaseLowdimDataset)
+
+        # configure dataset
+        dataset_2: BaseLowdimDataset
+        dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
+        assert isinstance(dataset_2, BaseLowdimDataset)
 
         pref_dataset: BaseLowdimDataset
-        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer=dataset.replay_buffer) #cfg.task.perf_dataset
+        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset_1.replay_buffer, \
+                                               replay_buffer_2=dataset_2.replay_buffer) #cfg.task.perf_dataset
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
 
         # configure validation dataset

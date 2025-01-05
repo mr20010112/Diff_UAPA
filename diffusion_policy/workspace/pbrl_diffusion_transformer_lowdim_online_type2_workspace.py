@@ -46,7 +46,7 @@ from diffusion_policy.common.compare_policy import comp_policy
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 # %%
-class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
+class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
     include_keys = ['global_step', 'epoch']
 
     def __init__(self, cfg: OmegaConf):
@@ -104,20 +104,19 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         normalizer = dataset.get_normalizer()
 
         # configure dataset
-        expert_dataset: BaseLowdimDataset
-        expert_dataset = hydra.utils.instantiate(cfg.task.expert_dataset)
-        #device = torch.device(cfg.training.device_cpu)
-        assert isinstance(expert_dataset, BaseLowdimDataset)
+        dataset_1: BaseLowdimDataset
+        dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
+        assert isinstance(dataset_1, BaseLowdimDataset)
+
 
         # configure dataset
-        normal_dataset: BaseLowdimDataset
-        normal_dataset = hydra.utils.instantiate(cfg.task.normal_dataset)
-        # expert_normalizer = normal_dataset.get_normalizer()
-        assert isinstance(normal_dataset, BaseLowdimDataset)
+        dataset_2: BaseLowdimDataset
+        dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
+        assert isinstance(dataset_2, BaseLowdimDataset)
 
         pref_dataset: BaseLowdimDataset
-        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, expert_replay_buffer=expert_dataset.replay_buffer, \
-                                               normal_replay_buffer=normal_dataset.replay_buffer) #cfg.task.perf_dataset
+        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset_1.replay_buffer, \
+                                               replay_buffer_2=dataset_2.replay_buffer)  #cfg.task.perf_dataset
 
         # pref_dataset.set_beta_priori(data_size=150)
         # pref_dataset.beta_model.fit_data(num_epochs=50, warm_up_epochs=5, batch_size=5, lr=1.0e-5)
@@ -351,7 +350,7 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
                     # run rollout
                     if (self.epoch % cfg.training.rollout_every) == 0:
-                        runner_log, episode_data = env_runner.run(policy)
+                        runner_log = env_runner.run(policy)
                         # log all
                         step_log.update(runner_log)
 
