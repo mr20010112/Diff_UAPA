@@ -29,7 +29,7 @@ from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
 from diffusion_policy.common.prior_utils_confidence import BetaNetwork
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 from diffusion_policy.policy.base_lowdim_policy import BaseLowdimPolicy
-from diffusion_policy.policy.ours_diffusion_transformer_lowdim_policy import DiffusionTransformerLowdimPolicy
+from diffusion_policy.policy.diffusion_transformer_lowdim_policy import DiffusionTransformerLowdimPolicy
 from diffusion_policy.dataset.base_dataset import BaseLowdimDataset
 from diffusion_policy.env_runner.base_lowdim_runner import BaseLowdimRunner
 from diffusion_policy.common.checkpoint_util import TopKCheckpointManager
@@ -40,8 +40,6 @@ from diffusers.training_utils import EMAModel
 from torch.cuda.amp import GradScaler, autocast 
 from diffusion_policy.model.common.slice import slice_episode
 from diffusion_policy.common.compute_all_loss import compute_all_traj_loss
-from diffusion_policy.common.compare_policy import comp_policy
-#from diffusion_policy.dataset.rlhf_kitchen_mjl_lowdim_dataset import RLHF_KitchenMjlLowdimDataset
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
@@ -151,18 +149,19 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
                 all_votes_1[local_epoch_idx] = np.maximum(all_votes_1[local_epoch_idx], 0)
                 all_votes_2[local_epoch_idx] = np.maximum(all_votes_2[local_epoch_idx], 0)
-    
-        init_votes_1 = np.sum(all_votes_1, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
-        init_votes_2 = np.sum(all_votes_2, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
 
-        pref_dataset.pref_replay_buffer.meta['votes'] = init_votes_1.reshape(-1, 1)
-        pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2.reshape(-1, 1)
-        pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
-        pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
+        if cfg.training.map.use_map:    
+            init_votes_1 = np.sum(all_votes_1, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
+            init_votes_2 = np.sum(all_votes_2, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
 
-        pref_dataset.set_beta_priori(data_size=150)
-        pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=30, warm_up_epochs=4, batch_size=5, lr=1.0e-5)
-        pref_dataset.update_beta_priori()
+            pref_dataset.pref_replay_buffer.meta['votes'] = init_votes_1.reshape(-1, 1)
+            pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2.reshape(-1, 1)
+            pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
+            pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
+
+            pref_dataset.set_beta_priori(data_size=150)
+            pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=30, warm_up_epochs=4, batch_size=5, lr=1.0e-5)
+            pref_dataset.update_beta_priori()
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset, dataset_1, dataset_2
@@ -336,7 +335,7 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
                     # run rollout
                     if (self.epoch % cfg.training.rollout_every) == 0:
-                        runner_log, episode_data = env_runner.run(policy)
+                        runner_log = env_runner.run(policy)
                         # log all
                         step_log.update(runner_log)
 

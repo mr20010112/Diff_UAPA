@@ -23,7 +23,10 @@ class BETLowdimPolicy(BaseLowdimPolicy):
             horizon,
             n_action_steps,
             n_obs_steps,
-            beta=1.0):
+            use_map=False,
+            beta=1.0,
+            map_ratio=1.0,
+            ):
         super().__init__()
     
         self.normalizer = LinearNormalizer()
@@ -33,8 +36,10 @@ class BETLowdimPolicy(BaseLowdimPolicy):
         self.horizon = horizon
         self.n_action_steps = n_action_steps
         self.n_obs_steps = n_obs_steps
+        self.use_map = use_map
         self.gamma = gamma
         self.beta = beta
+        self.map_ratio = map_ratio
 
     # ========= inference  ============
     def predict_action(self, obs_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
@@ -167,7 +172,7 @@ class BETLowdimPolicy(BaseLowdimPolicy):
 
         return loss
 
-    def compute_loss(self, batch, ref_policy: Optional[BaseLowdimPolicy] = None) -> torch.Tensor:
+    def compute_loss(self, batch, ref_policy: Optional[BaseLowdimPolicy] = None, avg_Traj_loss=0.0) -> torch.Tensor:
         # normalize input
         assert 'valid_mask' not in batch
 
@@ -179,6 +184,7 @@ class BETLowdimPolicy(BaseLowdimPolicy):
         observations_2 = batch["obs_2"].to(self.device).detach()
         actions_2 = batch["action_2"].to(self.device).detach()
         votes_2 = batch["votes_2"].to(self.device).detach()
+
 
         threshold = 1e-2
         diff = torch.abs(votes_1 - votes_2)
@@ -223,6 +229,8 @@ class BETLowdimPolicy(BaseLowdimPolicy):
         obs_2 = slice_episode(obs_2, horizon=self.horizon, stride=self.horizon)
         action_2 = slice_episode(action_2, horizon=self.horizon, stride=self.horizon)
 
+
+        loss = 0
         traj_loss_1, traj_loss_2 = 0, 0
         immatation_loss_1, immatation_loss_2 = 0, 0
 
@@ -277,6 +285,6 @@ class BETLowdimPolicy(BaseLowdimPolicy):
         mle_loss_1 = -F.logsigmoid(self.beta*(traj_loss_1 - traj_loss_2)) + immatation_loss_1/(2*len(obs_1)*self.n_obs_steps) + immatation_loss_2/(2*len(obs_2)*self.n_obs_steps) #-F.logsigmoid(self.beta*(traj_loss_1 - traj_loss_2))
         mle_loss_2 = -F.logsigmoid(self.beta*(traj_loss_2 - traj_loss_1)) + immatation_loss_1/(2*len(obs_1)*self.n_obs_steps) + immatation_loss_2/(2*len(obs_2)*self.n_obs_steps) #-F.logsigmoid(self.beta*(traj_loss_2 - traj_loss_1))
 
-        loss = (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2)
+        loss += (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2)
 
         return torch.mean(loss)

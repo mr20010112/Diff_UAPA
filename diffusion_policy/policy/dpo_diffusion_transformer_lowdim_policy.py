@@ -64,8 +64,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         self.pred_action_steps_only = pred_action_steps_only
         self.gamma = gamma
         self.beta = beta
-        self.use_map = use_map
-        self.map_ratio = map_ratio
         self.bias_reg = bias_reg
         self.kwargs = kwargs
 
@@ -350,21 +348,5 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
 
 
             loss += (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2) / (2 * self.train_time_samples[0]) 
-            
-            if self.use_map:
-
-                beta_dist = Beta(beta_priori[:, 0], beta_priori[:, 1])
-                beta_dist_2 = Beta(beta_priori_2[:, 0], beta_priori_2[:, 1])
-
-                max_idx_1 = (beta_priori[:, 0] - 1) / (beta_priori[:, 0] + beta_priori[:, 1] - 2)
-                max_idx_2 = (beta_priori_2[:, 0] - 1) / (beta_priori_2[:, 0] + beta_priori_2[:, 1] - 2)
-
-                map_loss_1 = - beta_dist.log_prob(torch.clamp(torch.sigmoid(traj_loss_1 - avg_traj_loss), min=1e-4, max=1-1e-4)) \
-                            + beta_dist.log_prob(torch.clamp(max_idx_1, min=1e-4, max=1-1e-4))
-
-                map_loss_2 = - beta_dist_2.log_prob(torch.clamp(torch.sigmoid(traj_loss_2 - avg_traj_loss), min=1e-4, max=1-1e-4)) \
-                            + beta_dist_2.log_prob(torch.clamp(max_idx_2, min=1e-4, max=1-1e-4))
-
-                loss += self.map_ratio * (map_loss_1 + map_loss_2) / (2 * self.train_time_samples[0])
 
         return torch.mean(loss)

@@ -19,11 +19,12 @@ import wandb
 import tqdm
 import numpy as np
 import shutil
+import scipy.stats as stats
 
 from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
 from diffusion_policy.model.common.lr_scheduler import get_scheduler
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
-from diffusion_policy.policy.cpl_bet_lowdim_policy import BETLowdimPolicy
+from diffusion_policy.policy.bet_lowdim_policy import BETLowdimPolicy
 from diffusion_policy.dataset.base_dataset import BaseLowdimDataset
 from diffusion_policy.env_runner.base_lowdim_runner import BaseLowdimRunner
 from diffusion_policy.common.checkpoint_util import TopKCheckpointManager
@@ -135,36 +136,34 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         # add noise to votes
         for local_epoch_idx in range(cfg.training.online.num_groups):
             if local_epoch_idx % cfg.training.online.reverse_freq == 0:
-                # delta = np.round(cfg.training.online.all_votes / cfg.training.online.num_groups * cfg.training.online.reverse_rate)
                 X = stats.truncnorm(-3, 3, loc=cfg.training.online.reverse_rate, scale=cfg.training.online.reverse_rate/3)
                 noise_ratio = X.rvs(all_votes_1.shape[1])
                 noise_ratio = noise_ratio.reshape(-1, 1)
 
                 # condiction = (all_votes_1[local_epoch_idx] > all_votes_2[local_epoch_idx])
-                all_votes_1[local_epoch_idx][indices], all_votes_2[local_epoch_idx][indices] = all_votes_1[local_epoch_idx][indices] + np.round((all_votes_2[local_epoch_idx][indices] - all_votes_1[local_epoch_idx][indices]) * noise_ratio[indices]), \
-                                                                            all_votes_2[local_epoch_idx][indices] + np.round((all_votes_1[local_epoch_idx][indices] - all_votes_2[local_epoch_idx][indices]) * noise_ratio[indices])
+                all_votes_1[local_epoch_idx][indices], all_votes_2[local_epoch_idx][indices] = \
+                    all_votes_1[local_epoch_idx][indices] + np.round((all_votes_2[local_epoch_idx][indices] - all_votes_1[local_epoch_idx][indices]) * noise_ratio[indices]), \
+                    all_votes_2[local_epoch_idx][indices] + np.round((all_votes_1[local_epoch_idx][indices] - all_votes_2[local_epoch_idx][indices]) * noise_ratio[indices])
                 
 
                 all_votes_1[local_epoch_idx] = np.maximum(all_votes_1[local_epoch_idx], 0)
                 all_votes_2[local_epoch_idx] = np.maximum(all_votes_2[local_epoch_idx], 0)
-    
-        init_votes_1 = np.sum(all_votes_1, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
-        init_votes_2 = np.sum(all_votes_2, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
 
-        pref_dataset.pref_replay_buffer.meta['votes'] = init_votes_1.reshape(-1, 1)
-        pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2.reshape(-1, 1)
-        pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
-        pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
+        if cfg.training.map.use_map:    
+            init_votes_1 = np.sum(all_votes_1, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
+            init_votes_2 = np.sum(all_votes_2, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
 
-        pref_dataset.set_beta_priori(data_size=150)
-        pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=40, warm_up_epochs=5, batch_size=5, lr=1.0e-5)
-        pref_dataset.update_beta_priori()
+            pref_dataset.pref_replay_buffer.meta['votes'] = init_votes_1.reshape(-1, 1)
+            pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2.reshape(-1, 1)
+            pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
+            pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
+
+            pref_dataset.set_beta_priori(data_size=150)
+            pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=40, warm_up_epochs=5, batch_size=5, lr=1.0e-5)
+            pref_dataset.update_beta_priori()
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset, dataset_1, dataset_2
-
-        val_dataset = pref_dataset.get_validation_dataset()
-        val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
 
         # configure lr scheduler
         lr_scheduler = get_scheduler(
@@ -179,30 +178,30 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
             last_epoch=self.global_step-1
         )
 
-        # configure env runner
-        env_runner: BaseLowdimRunner
-        env_runner = hydra.utils.instantiate(
-            cfg.task.env_runner,
-            output_dir=self.output_dir)
-        assert isinstance(env_runner, BaseLowdimRunner)
+        # # configure env runner
+        # env_runner: BaseLowdimRunner
+        # env_runner = hydra.utils.instantiate(
+        #     cfg.task.env_runner,
+        #     output_dir=self.output_dir)
+        # assert isinstance(env_runner, BaseLowdimRunner)
 
-        # configure logging
-        wandb_run = wandb.init(
-            dir=str(self.output_dir),
-            config=OmegaConf.to_container(cfg, resolve=True),
-            **cfg.logging
-        )
-        wandb.config.update(
-            {
-                "output_dir": self.output_dir,
-            }
-        )
+        # # configure logging
+        # wandb_run = wandb.init(
+        #     dir=str(self.output_dir),
+        #     config=OmegaConf.to_container(cfg, resolve=True),
+        #     **cfg.logging
+        # )
+        # wandb.config.update(
+        #     {
+        #         "output_dir": self.output_dir,
+        #     }
+        # )
 
-        # configure checkpoint
-        topk_manager = TopKCheckpointManager(
-            save_dir=os.path.join(self.output_dir, 'checkpoints'),
-            **cfg.checkpoint.topk
-        )
+        # # configure checkpoint
+        # topk_manager = TopKCheckpointManager(
+        #     save_dir=os.path.join(self.output_dir, 'checkpoints'),
+        #     **cfg.checkpoint.topk
+        # )
 
         # device transfer
         device = torch.device(cfg.training.device_gpu)
@@ -299,7 +298,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                                 'lr': lr_scheduler.get_last_lr()[0]
                             }
 
-                            is_last_batch = (batch_idx == (len(train_dataloader)-1))
+                            is_last_batch = (batch_idx == (len(train_dataloader)*cfg.training.online.num_groups-1))
                             if not is_last_batch:
                                 # log of last step is combined with validation and rollout
                                 wandb_run.log(step_log, step=self.global_step)
@@ -323,24 +322,6 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                         runner_log = env_runner.run(self.policy)
                         # log all
                         step_log.update(runner_log)
-                    
-                    # run validation
-                    if (self.epoch % cfg.training.val_every) == 0:
-                        with torch.no_grad():
-                            val_losses = list()
-                            with tqdm.tqdm(val_dataloader, desc=f"Validation epoch {self.epoch}", 
-                                    leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
-                                for batch_idx, batch in enumerate(tepoch):
-                                    batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
-                                    raw_loss = self.policy.compute_loss(batch)
-                                    val_losses.append(raw_loss)
-                                    if (cfg.training.max_val_steps is not None) \
-                                        and batch_idx >= (cfg.training.max_val_steps-1):
-                                        break
-                            if len(val_losses) > 0:
-                                val_loss = torch.mean(torch.tensor(val_losses)).item()
-                                # log epoch average validation loss
-                                step_log['val_loss'] = val_loss
 
                     # run sample on a training batch
                     if (self.epoch % cfg.training.sample_every) == 0:
