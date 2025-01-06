@@ -285,7 +285,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 loss_mask_1 = ~condition_mask_1
                 noisy_trajectory_1[condition_mask_1] = trajectory_1[condition_mask_1]
 
-                ref_pred_1 = ref_model(noisy_trajectory_1, timesteps, cond_1).detach()
                 pred_1 = self.model(noisy_trajectory_1, timesteps, cond_1)
 
                 pred_type_1 = self.noise_scheduler.config.prediction_type
@@ -318,7 +317,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 loss_mask_2 = ~condition_mask_2
                 noisy_trajectory_2[condition_mask_2] = trajectory_2[condition_mask_2]
 
-                ref_pred_2 = ref_model(noisy_trajectory_2, timesteps, cond_2).detach()
                 pred_2 = self.model(noisy_trajectory_2, timesteps, cond_2)
 
                 pred_type_2 = self.noise_scheduler.config.prediction_type
@@ -341,7 +339,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             traj_loss_1 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_1
             traj_loss_2 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_2
             avg_traj_loss = -self.beta * self.noise_scheduler.config.num_train_timesteps * avg_traj_loss
-            immitation_loss = -self.beta * immitation_loss
+            immitation_loss = -self.beta * 0.05 * self.noise_scheduler.config.num_train_timesteps * immitation_loss 
 
             mle_loss_1 = -F.logsigmoid(traj_loss_1 - traj_loss_2 + immitation_loss)
             mle_loss_2 = -F.logsigmoid(traj_loss_2 - traj_loss_1 + immitation_loss)

@@ -284,8 +284,6 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                                 avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
                                                                       model = self.model, ref_model = ref_policy.model)
                             raw_loss = self.model.compute_loss(batch, ref_model=ref_policy.model, avg_traj_loss = avg_traj_loss)
-                            # map_loss_batch_numpy = [tensor.detach().cpu().numpy() for tensor in map_loss_batch]
-                            # map_loss.append(map_loss_batch_numpy)
                             loss = raw_loss / cfg.training.gradient_accumulate_every
                             loss.backward()
 

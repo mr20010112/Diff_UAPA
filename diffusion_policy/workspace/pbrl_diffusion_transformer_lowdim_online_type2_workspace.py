@@ -246,19 +246,14 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
                 self.model.map_ratio = (online_epoch_idx + 1) * cfg.training.map.map_ratio / (cfg.training.online.num_groups)
 
-                if not cfg.training.online.update_history:
-                    local_votes_1 = np.array(all_votes_1[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \
-                                            (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
-                    
-                    local_votes_2 = np.array(all_votes_2[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \
-                                            (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
-                else:
-                    local_votes_1 = np.array(all_votes_1[:online_epoch_idx+1].T / (all_votes_1[:online_epoch_idx+1].T + \
-                                            all_votes_2[:online_epoch_idx+1].T), dtype=np.float32).reshape(-1, 1)
-                    
-                    local_votes_2 = np.array(all_votes_2[:online_epoch_idx+1].T / (all_votes_1[:online_epoch_idx+1].T + \
-                                            all_votes_2[:online_epoch_idx+1].T), dtype=np.float32).reshape(-1, 1)
 
+                local_votes_1 = np.array(all_votes_1[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \
+                                        (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
+                
+                local_votes_2 = np.array(all_votes_2[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \
+                                        (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
+ 
+                    
                 pref_dataset.pref_replay_buffer.meta['votes'] = local_votes_1
                 pref_dataset.pref_replay_buffer.meta['votes_2'] = local_votes_2
                 pref_dataset.pref_replay_buffer.root['meta']['votes'] = local_votes_1
