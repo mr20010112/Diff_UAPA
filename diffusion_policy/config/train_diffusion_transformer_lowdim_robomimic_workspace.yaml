@@ -93,7 +93,7 @@ pred_action_steps_only: false
 task:
   abs_action: true
   action_dim: 10
-  expert_dataset:
+  dataset_1:
     _target_: diffusion_policy.dataset.robomimic_replay_lowdim_dataset.RobomimicReplayLowdimDataset
     abs_action: true
     dataset_path: data/robomimic/datasets/lift/ph/low_dim_abs.hdf5
@@ -108,7 +108,7 @@ task:
     rotation_rep: rotation_6d
     seed: 42
     val_ratio: 0.02
-  normal_dataset:
+  dataset_2:
     _target_: diffusion_policy.dataset.robomimic_replay_lowdim_dataset.RobomimicReplayLowdimDataset
     abs_action: true
     dataset_path: data/robomimic/datasets/lift/ph/low_dim_abs.hdf5

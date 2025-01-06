@@ -165,7 +165,7 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         #     pref_dataset.update_beta_priori()
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
-        del dataset, expert_dataset, normal_dataset
+        del dataset, dataset_1, dataset_2
 
         self.model.set_normalizer(normalizer)
         if cfg.training.use_ema:
@@ -241,10 +241,10 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
 
                 pref_dataset.set_beta_priori(data_size=150)
-                pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=40, warm_up_epochs=5, batch_size=5, lr=1.0e-5)
+                pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=30, warm_up_epochs=4, batch_size=5, lr=1.0e-5)
                 pref_dataset.update_beta_priori()
 
-                self.model.map_ratio = (online_epoch_idx + 1) * cfg.training.online.map_ratio / (cfg.training.online.num_groups)
+                self.model.map_ratio = (online_epoch_idx + 1) * cfg.training.map.map_ratio / (cfg.training.online.num_groups)
 
                 if not cfg.training.online.update_history:
                     local_votes_1 = np.array(all_votes_1[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \

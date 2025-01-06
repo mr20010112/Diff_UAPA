@@ -118,8 +118,8 @@ class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
                         'votes_2': votes_2,               # Vote for the second trajectory
                         'length': np.array([length]),     # Length of the first trajectory
                         'length_2': np.array([length_2]), # Length of the second trajectory
-                        'beta_priori': np.zeros([2]),
-                        'beta_priori_2': np.zeros([2]),
+                        'beta_priori': np.ones([2]),
+                        'beta_priori_2': np.ones([2]),
                     }
                 )
 

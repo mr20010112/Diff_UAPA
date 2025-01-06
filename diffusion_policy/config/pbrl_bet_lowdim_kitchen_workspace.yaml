@@ -62,14 +62,14 @@ policy:
   n_action_steps: ${n_action_steps}
 
 dataloader:
-  batch_size: 35
+  batch_size: 30
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 35
+  batch_size: 30
   num_workers: 1
   shuffle: False
   pin_memory: True
@@ -89,7 +89,7 @@ training:
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 0
-  num_epochs: 50
+  num_epochs: 15
   gradient_accumulate_every: 1
   grad_norm_clip: 1.0
   enable_normalizer: True

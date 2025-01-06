@@ -46,7 +46,7 @@ origin_dataset:
   seed: 42
   val_ratio: 0.02
 
-expert_dataset:
+dataset_1:
   _target_: diffusion_policy.dataset.robomimic_replay_lowdim_dataset.RobomimicReplayLowdimDataset
   dataset_path: data/robomimic/datasets/${task.task_name}/ph/low_dim_abs.hdf5
   horizon: ${horizon}
@@ -59,7 +59,7 @@ expert_dataset:
   seed: 42
   val_ratio: 0.02
 
-normal_dataset:
+dataset_2:
   _target_: diffusion_policy.dataset.robomimic_replay_lowdim_dataset.RobomimicReplayLowdimDataset
   dataset_path: data/robomimic/datasets/${task.task_name}/mh/low_dim_abs.hdf5
   horizon: ${horizon}
