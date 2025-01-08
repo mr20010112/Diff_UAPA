@@ -22,7 +22,7 @@ obs_as_cond: True
 pred_action_steps_only: False
 
 policy: 
-  _target_: diffusion_policy.policy.dpo_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy
+  _target_: diffusion_policy.policy.cpl_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy
 
   model: 
     _target_: diffusion_policy.model.diffusion.transformer_for_diffusion.TransformerForDiffusion
@@ -54,7 +54,7 @@ policy:
     prediction_type: epsilon # or sample
 
   gamma: ${gamma}
-  beta: 0.00357
+  beta: 0.00003125 #dpo:0.0005; cpl:0.00003125
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
   bias_reg: 0.25
@@ -80,14 +80,14 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 30
+  batch_size: 60
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 30
+  batch_size: 60
   num_workers: 1
   shuffle: True
   pin_memory: True
@@ -108,7 +108,7 @@ training:
   lr_scheduler: cosine
   # Transformer needs LR warmup
   lr_warmup_steps: 0
-  num_epochs: 31
+  num_epochs: 15
   # lr_end: 1.0e-8
   # power: 1.5
   gradient_accumulate_every: 1
