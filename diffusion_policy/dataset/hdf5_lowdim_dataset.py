@@ -12,16 +12,14 @@ from diffusion_policy.model.common.normalizer import LinearNormalizer, SingleFie
 from diffusion_policy.dataset.base_dataset import BaseLowdimDataset
 from diffusion_policy.env.kitchen.kitchen_util import parse_mjl_logs
 
-#处理 "kitchen" 任务的低维数据集。该类从 .mjl 文件中解析数据，存储在 ReplayBuffer 中，并对数据进行采样
 
-class KitchenHdf5LowdimDataset(BaseLowdimDataset):
+class Hdf5LowdimDataset(BaseLowdimDataset):
     def __init__(self,
             dataset_dir=None,
             horizon=1,
             pad_before=0,
             pad_after=0,
             abs_action=True,
-            robot_noise_ratio=0.0, #添加到观测值中的噪声比例，模拟机器人噪声
             seed=42,
             val_ratio=0.0
         ):

@@ -117,10 +117,6 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset_1.replay_buffer, \
                                                replay_buffer_2=dataset_2.replay_buffer) #cfg.task.perf_dataset
 
-        # pref_dataset.set_beta_priori(data_size=150)
-        # pref_dataset.beta_model.fit_data(num_epochs=50, warm_up_epochs=5, batch_size=5, lr=1.0e-5)
-        # pref_dataset.update_beta_priori()
-
         # cut online groups
         votes_1, votes_2 = pref_dataset.pref_replay_buffer.meta['votes'], pref_dataset.pref_replay_buffer.meta['votes_2']
         var = (votes_1 * votes_2) / (((votes_1 + votes_2) ** 2) * (votes_1 + votes_2 + 1))

@@ -149,18 +149,18 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                 all_votes_1[local_epoch_idx] = np.maximum(all_votes_1[local_epoch_idx], 0)
                 all_votes_2[local_epoch_idx] = np.maximum(all_votes_2[local_epoch_idx], 0)
 
-        if cfg.training.map.use_map:    
-            init_votes_1 = np.sum(all_votes_1, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
-            init_votes_2 = np.sum(all_votes_2, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
+        # if cfg.training.map.use_map:    
+        #     init_votes_1 = np.sum(all_votes_1, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
+        #     init_votes_2 = np.sum(all_votes_2, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
 
-            pref_dataset.pref_replay_buffer.meta['votes'] = init_votes_1.reshape(-1, 1)
-            pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2.reshape(-1, 1)
-            pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
-            pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
+        #     pref_dataset.pref_replay_buffer.meta['votes'] = init_votes_1.reshape(-1, 1)
+        #     pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2.reshape(-1, 1)
+        #     pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
+        #     pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
 
-            pref_dataset.set_beta_priori(data_size=150)
-            pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=40, warm_up_epochs=5, batch_size=5, lr=1.0e-5)
-            pref_dataset.update_beta_priori()
+        #     pref_dataset.set_beta_priori(data_size=150)
+        #     pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=40, warm_up_epochs=5, batch_size=5, lr=1.0e-5)
+        #     pref_dataset.update_beta_priori()
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset, dataset_1, dataset_2

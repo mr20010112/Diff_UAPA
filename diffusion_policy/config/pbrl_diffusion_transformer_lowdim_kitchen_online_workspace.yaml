@@ -54,7 +54,7 @@ policy:
     prediction_type: epsilon # or sample
 
   gamma: ${gamma}
-  beta: 0.00714 #ours:0.00714
+  beta: 0.0357 #ours:0.0357
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
   bias_reg: 0.25
@@ -100,7 +100,7 @@ optimizer:
 
 training:
   device_cpu: "cpu"
-  device_gpu: "cuda:1"
+  device_gpu: "cuda:0"
   seed: 42
   debug: False
   resume: True

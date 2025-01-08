@@ -16,7 +16,6 @@ from diffusion_policy.common.replay_buffer import ReplayBuffer
 from diffusion_policy.common.sampler import SequenceSampler, get_val_mask
 from diffusion_policy.model.common.normalizer import LinearNormalizer, SingleFieldLinearNormalizer
 from diffusion_policy.dataset.base_dataset import BaseLowdimDataset
-from diffusion_policy.env.kitchen.kitchen_util import parse_mjl_logs
 from diffusion_policy.common.pref_replay_buffer import PrefReplayBuffer
 from diffusion_policy.common.pref_sampler import PrefSequenceSampler
 from typing import Optional, Dict
@@ -24,7 +23,7 @@ from diffusion_policy.common.prior_utils_confidence import BetaNetwork
 
 #处理 "kitchen" 任务的低维数据集。该类从 .mjl 文件中解析数据，存储在 ReplayBuffer 中，并对数据进行采样
 
-class RLHF_KitchenLowdimDataset(BaseLowdimDataset):
+class RLHF_Hdf5LowdimDataset(BaseLowdimDataset):
     def __init__(self,
                 replay_buffer_1: ReplayBuffer,
                 replay_buffer_2: ReplayBuffer,

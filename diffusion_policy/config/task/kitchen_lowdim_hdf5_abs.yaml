@@ -38,30 +38,28 @@ origin_dataset:
   val_ratio: 0.02
 
 dataset_1:
-  _target_: diffusion_policy.dataset.kitchen_hdf5_lowdim_dataset.KitchenHdf5LowdimDataset
+  _target_: diffusion_policy.dataset.hdf5_lowdim_dataset.Hdf5LowdimDataset
   dataset_dir: ${training.dataset_1_dir}
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1'}
   pad_after: ${eval:'${n_action_steps}-1'}
   abs_action: ${task.abs_action}
-  robot_noise_ratio: ${task.robot_noise_ratio}
   seed: 42
   val_ratio: 0.02
 
 dataset_2:
-  _target_: diffusion_policy.dataset.kitchen_hdf5_lowdim_dataset.KitchenHdf5LowdimDataset
+  _target_: diffusion_policy.dataset.hdf5_lowdim_dataset.Hdf5LowdimDataset
   dataset_dir: ${training.dataset_2_dir}
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1'}
   pad_after: ${eval:'${n_action_steps}-1'}
   abs_action: ${task.abs_action}
-  robot_noise_ratio: ${task.robot_noise_ratio}
   seed: 42
   val_ratio: 0.02
 
 pref_dataset:
-  _target_: diffusion_policy.dataset.rlhf_kitchen_lowdim_dataset.RLHF_KitchenLowdimDataset
-  sequence_length: 280
+  _target_: diffusion_policy.dataset.rlhf_lowdim_dataset.RLHF_Hdf5LowdimDataset
+  sequence_length: ${task.env_runner.max_steps}
   val_ratio: 0
   N: 500
   gamma: ${gamma}

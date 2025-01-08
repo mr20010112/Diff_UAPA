@@ -1,19 +1,19 @@
 defaults:
   - _self_
-  - task: kitchen_lowdim_hdf5_abs #kitchen_lowdim_abs
+  - task: lift_lowdim_abs #kitchen_lowdim_abs
 
 name: train_diffusion_transformer_lowdim
-_target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type1_workspace.PbrlDiffusionTransformerLowdimWorkspace
-checkpoint_dir: '/home/mrq/project/diffusion_policy-main/data/experiments/low_dim/kitchen/diffusion_policy_transformer/base_0.5/seed=42.ckpt'
+_target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_workspace.PbrlDiffusionTransformerLowdimWorkspace
+checkpoint_dir: 'data/experiments/low_dim/robomimic/lift/base_0.5/epoch=0050-test_mean_score=0.620.ckpt'
 
 obs_dim: ${task.obs_dim}
 action_dim: ${task.action_dim}
 task_name: ${task.name}
 exp_name: "default"
 
-gamma: 0.997
-horizon: 16
-n_obs_steps: 4
+gamma: 0.999
+horizon: 10
+n_obs_steps: 2
 n_action_steps: 8
 n_latency_steps: 0
 past_action_visible: False
@@ -80,14 +80,14 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 32
+  batch_size: 30
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 32
+  batch_size: 30
   num_workers: 1
   shuffle: True
   pin_memory: True
@@ -124,8 +124,8 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
-  dataset_1_dir: 'data/kitchen/Minari/normal/base_0.5/kitchen_data_0.5.h5'
-  dataset_2_dir: 'data/kitchen/Minari/normal/base_0.5/kitchen_data_0.5.h5'
+  dataset_1_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.5.h5'
+  dataset_2_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.5_2.h5'
   map:
     use_map: False
     map_ratio: 0.25
