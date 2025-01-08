@@ -3,7 +3,7 @@ defaults:
   - task: kitchen_lowdim_hdf5_abs #kitchen_lowdim_abs
 
 name: train_diffusion_transformer_lowdim
-_target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type1_workspace.PbrlDiffusionTransformerLowdimWorkspace
+_target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_workspace.PbrlDiffusionTransformerLowdimWorkspace
 checkpoint_dir: '/home/mrq/project/diffusion_policy-main/data/experiments/low_dim/kitchen/diffusion_policy_transformer/base_0.5/seed=42.ckpt'
 
 obs_dim: ${task.obs_dim}

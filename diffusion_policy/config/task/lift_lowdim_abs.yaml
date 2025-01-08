@@ -48,7 +48,7 @@ origin_dataset:
 
 dataset_1:
   _target_: diffusion_policy.dataset.hdf5_lowdim_dataset.Hdf5LowdimDataset
-  dataset_path: ${training.dataset_1_dir}
+  dataset_dir: ${training.dataset_1_dir}
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
   pad_after: ${eval:'${n_action_steps}-1'}
@@ -57,7 +57,7 @@ dataset_1:
 
 dataset_2:
   _target_: diffusion_policy.dataset.hdf5_lowdim_dataset.Hdf5LowdimDataset
-  dataset_path: ${training.dataset_2_dir}
+  dataset_dir: ${training.dataset_2_dir}
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
   pad_after: ${eval:'${n_action_steps}-1'}
@@ -65,10 +65,10 @@ dataset_2:
   val_ratio: 0.02
 
 pref_dataset:
-  _target_: diffusion_policy.dataset.rlhf_kitchen_lowdim_dataset.RLHF_KitchenLowdimDataset
+  _target_: diffusion_policy.dataset.pbrl_lowdim_dataset.Pbrl_Hdf5LowdimDataset
   sequence_length: ${task.env_runner.max_steps}
   val_ratio: 0
   N: 500
   gamma: ${gamma}
   gpu_device: ${training.device_gpu}
-  save_dir: data/pref_data/kitchen
+  save_dir: data/pref_data/robomimic/lift

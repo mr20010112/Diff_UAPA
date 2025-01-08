@@ -23,7 +23,7 @@ from diffusion_policy.common.prior_utils_confidence import BetaNetwork
 
 #处理 "kitchen" 任务的低维数据集。该类从 .mjl 文件中解析数据，存储在 ReplayBuffer 中，并对数据进行采样
 
-class RLHF_Hdf5LowdimDataset(BaseLowdimDataset):
+class Pbrl_Hdf5LowdimDataset(BaseLowdimDataset):
     def __init__(self,
                 replay_buffer_1: ReplayBuffer,
                 replay_buffer_2: ReplayBuffer,
