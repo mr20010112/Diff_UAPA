@@ -341,7 +341,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             avg_traj_loss = -self.beta * self.noise_scheduler.config.num_train_timesteps * avg_traj_loss
             immitation_loss = -self.beta * 0.05 * self.noise_scheduler.config.num_train_timesteps * immitation_loss 
 
-            diff_loss = torch.mean(traj_loss_1 - traj_loss_2)
+            diff_loss = torch.mean(torch.abs(traj_loss_1 - traj_loss_2))
 
             mle_loss_1 = -F.logsigmoid(traj_loss_1 - traj_loss_2 + immitation_loss)
             mle_loss_2 = -F.logsigmoid(traj_loss_2 - traj_loss_1 + immitation_loss)

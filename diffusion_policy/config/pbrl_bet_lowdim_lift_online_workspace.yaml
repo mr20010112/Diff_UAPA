@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - task: kitchen_lowdim_hdf5_abs
+  - task: lift_lowdim_abs
 
 name: train_bet_lowdim
 _target_: diffusion_policy.workspace.pbrl_bet_lowdim_online_type1_workspace.PbrlBETLowdimWorkspace
@@ -12,9 +12,9 @@ keypoint_dim: ${task.keypoint_dim}
 task_name: ${task.name}
 exp_name: "default"
 
-gamma: 0.997
-horizon: 16
-n_obs_steps: 4
+gamma: 0.999
+horizon: 10
+n_obs_steps: 2
 n_action_steps: 8
 n_latency_steps: 0
 past_action_visible: False
@@ -24,11 +24,11 @@ obs_as_global_cond: False
 pred_action_steps_only: False
 
 policy:
-  _target_: diffusion_policy.policy.dpo_bet_lowdim_policy.BETLowdimPolicy #cpl_bet_lowdim_policy, dpo_bet_lowdim_policy
+  _target_: diffusion_policy.policy.cpl_bet_lowdim_policy.BETLowdimPolicy
 
   action_ae:
     _target_: diffusion_policy.model.bet.action_ae.discretizers.k_means.KMeansDiscretizer
-    num_bins: 64
+    num_bins: 24
     action_dim: ${action_dim}
     predict_offsets: True
   
@@ -56,33 +56,35 @@ policy:
     action_dim: ${action_dim}
 
   gamma: ${gamma}
-  beta: 1 #cpl 0.5 #dpo 1
+  beta: 0.025 #cpl:0.000625; dpo:0.025
+  bias_reg: 0.25
   horizon: ${horizon}
   n_obs_steps: ${n_obs_steps}
   n_action_steps: ${n_action_steps}
 
 dataloader:
-  batch_size: 40
+  batch_size: 30
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 40
+  batch_size: 30
   num_workers: 1
   shuffle: False
   pin_memory: True
   persistent_workers: False
 
 optimizer:
-  learning_rate: 1e-6 # 1e-4
+  learning_rate: 0.00001 # 1e-4
   weight_decay: 0.01
   betas: [0.9, 0.99]
 
+
 training:
   device_cpu: "cpu"
-  device_gpu: "cuda:1"
+  device_gpu: "cuda:0"
   seed: 42
   debug: False
   resume: True
@@ -104,8 +106,8 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
-  dataset_1_dir: 'data/kitchen/Minari/normal/base_0.45/kitchen_data_0.45.h5'
-  dataset_2_dir: 'data/kitchen/Minari/normal/base_0.45/kitchen_data_0.45.h5'
+  dataset_1_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.4.h5'
+  dataset_2_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.7.h5'
   online:
     num_groups: 4
     all_votes: 100
@@ -113,9 +115,6 @@ training:
     reverse_rate: 0.5
     reverse_freq: 1
     update_history: False
-  map:
-    use_map: False # only true when use our method
-    map_ratio: 0.25
 
 
 logging:

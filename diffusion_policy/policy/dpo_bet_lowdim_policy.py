@@ -23,6 +23,8 @@ class BETLowdimPolicy(BaseLowdimPolicy):
             horizon,
             n_action_steps,
             n_obs_steps,
+            map_ratio=0.1,
+            bias_reg=0.0,
             beta=1.0):
         super().__init__()
     
@@ -281,8 +283,7 @@ class BETLowdimPolicy(BaseLowdimPolicy):
 
         # traj_loss_1 = torch.sum(traj_loss_1, dim=-1)
         # traj_loss_2 = torch.sum(traj_loss_2, dim=-1)
-        delta_loss = torch.abs(traj_loss_1 - traj_loss_2)
-        mean_delta_loss = torch.mean(delta_loss)
+        diff_loss = torch.mean(torch.abs(traj_loss_1 - traj_loss_2))
 
         mle_loss_1 = -F.logsigmoid(self.beta*(traj_loss_1 - traj_loss_2)) + immatation_loss_1/(2*len(obs_1)*self.n_obs_steps) + immatation_loss_2/(2*len(obs_2)*self.n_obs_steps)
         mle_loss_2 = -F.logsigmoid(self.beta*(traj_loss_2 - traj_loss_1)) + immatation_loss_1/(2*len(obs_1)*self.n_obs_steps) + immatation_loss_2/(2*len(obs_2)*self.n_obs_steps)

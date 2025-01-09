@@ -24,6 +24,7 @@ class BETLowdimPolicy(BaseLowdimPolicy):
             n_action_steps,
             n_obs_steps,
             use_map=False,
+            bias_reg=0.25,
             beta=1.0,
             map_ratio=1.0,
             ):
@@ -39,7 +40,7 @@ class BETLowdimPolicy(BaseLowdimPolicy):
         self.use_map = use_map
         self.gamma = gamma
         self.beta = beta
-        self.map_ratio = map_ratio
+        self.bias_reg = bias_reg
 
     # ========= inference  ============
     def predict_action(self, obs_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
@@ -279,11 +280,11 @@ class BETLowdimPolicy(BaseLowdimPolicy):
 
         # traj_loss_1 = torch.sum(traj_loss_1, dim=-1)
         # traj_loss_2 = torch.sum(traj_loss_2, dim=-1)
-        delta_loss = torch.abs(traj_loss_1 - traj_loss_2)
-        mean_delta_loss = torch.mean(delta_loss)
+        mean_loss_1 = torch.mean(torch.abs(traj_loss_1 - self.bias_reg *  traj_loss_2))
+        mean_loss_2 = torch.mean(torch.abs(traj_loss_2 - self.bias_reg *  traj_loss_1))
 
-        mle_loss_1 = -F.logsigmoid(self.beta*(traj_loss_1 - traj_loss_2)) + immatation_loss_1/(2*len(obs_1)*self.n_obs_steps) + immatation_loss_2/(2*len(obs_2)*self.n_obs_steps) #-F.logsigmoid(self.beta*(traj_loss_1 - traj_loss_2))
-        mle_loss_2 = -F.logsigmoid(self.beta*(traj_loss_2 - traj_loss_1)) + immatation_loss_1/(2*len(obs_1)*self.n_obs_steps) + immatation_loss_2/(2*len(obs_2)*self.n_obs_steps) #-F.logsigmoid(self.beta*(traj_loss_2 - traj_loss_1))
+        mle_loss_1 = -F.logsigmoid(self.beta*(traj_loss_1 - self.bias_reg * traj_loss_2)) + immatation_loss_1/(2*len(obs_1)*self.n_obs_steps) + immatation_loss_2/(2*len(obs_2)*self.n_obs_steps)
+        mle_loss_2 = -F.logsigmoid(self.beta*(traj_loss_2 - self.bias_reg * traj_loss_1)) + immatation_loss_1/(2*len(obs_1)*self.n_obs_steps) + immatation_loss_2/(2*len(obs_2)*self.n_obs_steps)
 
         loss += (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2)
 
