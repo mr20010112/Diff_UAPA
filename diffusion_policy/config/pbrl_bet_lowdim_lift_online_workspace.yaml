@@ -24,7 +24,7 @@ obs_as_global_cond: False
 pred_action_steps_only: False
 
 policy:
-  _target_: diffusion_policy.policy.cpl_bet_lowdim_policy.BETLowdimPolicy
+  _target_: diffusion_policy.policy.dpo_bet_lowdim_policy.BETLowdimPolicy
 
   action_ae:
     _target_: diffusion_policy.model.bet.action_ae.discretizers.k_means.KMeansDiscretizer
@@ -56,21 +56,21 @@ policy:
     action_dim: ${action_dim}
 
   gamma: ${gamma}
-  beta: 0.025 #cpl:0.000625; dpo:0.025
+  beta: 0.025 #cpl:0.0025; dpo:0.025
   bias_reg: 0.25
   horizon: ${horizon}
   n_obs_steps: ${n_obs_steps}
   n_action_steps: ${n_action_steps}
 
 dataloader:
-  batch_size: 30
+  batch_size: 15
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 30
+  batch_size: 15
   num_workers: 1
   shuffle: False
   pin_memory: True
