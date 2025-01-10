@@ -1,0 +1,149 @@
+defaults:
+  - _self_
+  - task: can_lowdim
+
+name: train_bet_lowdim
+_target_: diffusion_policy.workspace.pbrl_bet_lowdim_online_type1_workspace.PbrlBETLowdimWorkspace
+checkpoint_dir: 'data/experiments/low_dim/robomimic/can/bet/base/epoch=0004-test_mean_score=0.560.ckpt'
+
+obs_dim: ${task.obs_dim}
+action_dim: ${task.action_dim}
+keypoint_dim: ${task.keypoint_dim}
+task_name: ${task.name}
+exp_name: "default"
+
+gamma: 0.999
+horizon: 10
+n_obs_steps: 2
+n_action_steps: 8
+n_latency_steps: 0
+past_action_visible: False
+keypoint_visible_rate: 1.0
+obs_as_local_cond: False
+obs_as_global_cond: False
+pred_action_steps_only: False
+
+policy:
+  _target_: diffusion_policy.policy.dpo_bet_lowdim_policy.BETLowdimPolicy
+
+  action_ae:
+    _target_: diffusion_policy.model.bet.action_ae.discretizers.k_means.KMeansDiscretizer
+    num_bins: 24
+    action_dim: ${action_dim}
+    predict_offsets: True
+  
+  obs_encoding_net:
+    _target_: torch.nn.Identity
+    output_dim: ${obs_dim}
+  
+  state_prior:
+    _target_: diffusion_policy.model.bet.latent_generators.mingpt.MinGPT
+
+    discrete_input: false
+    input_dim: ${obs_dim}
+
+    vocab_size: ${policy.action_ae.num_bins}
+
+    # Architecture details
+    n_layer: 4
+    n_head: 4
+    n_embd: 72
+
+    block_size: ${horizon}  # Length of history/context
+    predict_offsets: True
+    offset_loss_scale: 1000.0  # actions are very small
+    focal_loss_gamma: 2.0
+    action_dim: ${action_dim}
+
+  gamma: ${gamma}
+  beta: 0.025 #cpl:0.0025; dpo:0.025
+  bias_reg: 0.25
+  horizon: ${horizon}
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${n_action_steps}
+
+dataloader:
+  batch_size: 45
+  num_workers: 1
+  shuffle: True
+  pin_memory: True
+  persistent_workers: False
+
+val_dataloader:
+  batch_size: 45
+  num_workers: 1
+  shuffle: False
+  pin_memory: True
+  persistent_workers: False
+
+optimizer:
+  learning_rate: 0.00001 # 1e-4
+  weight_decay: 0.01
+  betas: [0.9, 0.99]
+
+
+training:
+  device_cpu: "cpu"
+  device_gpu: "cuda:0"
+  seed: 42
+  debug: False
+  resume: True
+  # optimization
+  lr_scheduler: cosine
+  lr_warmup_steps: 0
+  num_epochs: 15
+  gradient_accumulate_every: 1
+  grad_norm_clip: 1.0
+  enable_normalizer: True
+  # training loop control
+  # in epochs
+  rollout_every: 10
+  checkpoint_every: 10
+  val_every: 1
+  sample_every: 5
+  # steps per epoch
+  max_train_steps: null
+  max_val_steps: null
+  # misc
+  tqdm_interval_sec: 1.0
+  dataset_1_dir: 'data/robomimic/datasets/can/normal/robomimic_data_0.5.h5'
+  dataset_2_dir: 'data/robomimic/datasets/can/normal/robomimic_data_0.5.h5'
+  online:
+    num_groups: 4
+    all_votes: 100
+    reverse_ratio: 0.2
+    reverse_rate: 0.5
+    reverse_freq: 1
+    update_history: False
+
+
+logging:
+  project: diffusion_policy_debug
+  resume: True
+  mode: online
+  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+  tags: ["${name}", "${task_name}", "${exp_name}"]
+  id: null
+  group: null
+
+checkpoint:
+  topk:
+    monitor_key: test_mean_score
+    mode: max
+    k: 5
+    format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
+  save_last_ckpt: True
+  save_last_snapshot: False
+
+multi_run:
+  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+
+hydra:
+  job:
+    override_dirname: ${name}
+  run:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  sweep:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    subdir: ${hydra.job.num}

@@ -6,7 +6,7 @@ keypoint_dim: 3
 
 obs_keys: &obs_keys ['object', 'robot0_eef_pos', 'robot0_eef_quat', 'robot0_gripper_qpos']
 task_name: &task_name can
-dataset_type: &dataset_type ph
+dataset_type: &dataset_type mh
 dataset_path: &dataset_path data/robomimic/datasets/${task.task_name}/${task.dataset_type}/low_dim_abs.hdf5
 abs_action: &abs_action True
 
@@ -32,7 +32,7 @@ env_runner:
   abs_action: *abs_action
   n_envs: 28
 
-dataset:
+origin_dataset:
   _target_: diffusion_policy.dataset.robomimic_replay_lowdim_dataset.RobomimicReplayLowdimDataset
   dataset_path: *dataset_path
   horizon: ${horizon}
@@ -44,3 +44,30 @@ dataset:
   rotation_rep: rotation_6d
   seed: 42
   val_ratio: 0.02
+
+dataset_1:
+  _target_: diffusion_policy.dataset.hdf5_lowdim_dataset.Hdf5LowdimDataset
+  dataset_dir: ${training.dataset_1_dir}
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+
+dataset_2:
+  _target_: diffusion_policy.dataset.hdf5_lowdim_dataset.Hdf5LowdimDataset
+  dataset_dir: ${training.dataset_2_dir}
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+
+pref_dataset:
+  _target_: diffusion_policy.dataset.pbrl_lowdim_dataset.Pbrl_Hdf5LowdimDataset
+  sequence_length: ${task.env_runner.max_steps}
+  val_ratio: 0
+  N: 500
+  gamma: ${gamma}
+  gpu_device: ${training.device_gpu}
+  save_dir: data/pref_data/robomimic/can
