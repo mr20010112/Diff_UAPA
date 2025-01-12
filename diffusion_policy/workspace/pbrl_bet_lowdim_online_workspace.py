@@ -122,6 +122,34 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
 
         # cut online groups
         votes_1, votes_2 = pref_dataset.pref_replay_buffer.meta['votes'], pref_dataset.pref_replay_buffer.meta['votes_2']
+
+        # normalization votes
+        votes_concat = np.concatenate((votes_1, votes_2), axis=1)
+        votes_mean = votes_concat.mean()
+        votes_std = votes_concat.std()
+
+        votes_1 = np.clip(votes_1, votes_mean - 3 * votes_std, votes_mean + 3 * votes_std)
+        votes_2 = np.clip(votes_2, votes_mean - 3 * votes_std, votes_mean + 3 * votes_std)
+
+        votes_concat = np.concatenate((votes_1, votes_2), axis=1)
+        votes_mean = votes_concat.mean()
+        votes_std = votes_concat.std()
+
+        votes_1 = (votes_1 - votes_mean) / (votes_std + 1e-8)
+        votes_2 = (votes_2 - votes_mean) / (votes_std + 1e-8)
+
+        votes_concat = np.concatenate((votes_1, votes_2), axis=1)
+        votes_min = votes_concat.min()
+        votes_max = votes_concat.max()
+
+        votes_1_norm = (votes_1 - votes_min) / (votes_max - votes_min + 1e-8)
+        votes_2_norm = (votes_2 - votes_min) / (votes_max - votes_min + 1e-8)
+
+        scale_factor = 10
+        votes_1 = votes_1_norm * scale_factor
+        votes_2 = votes_2_norm * scale_factor
+
+        #select uncertain samples
         var = (votes_1 * votes_2) / (((votes_1 + votes_2) ** 2) * (votes_1 + votes_2 + 1))
         var_flat = var.flatten()
         count = int(len(var_flat) * cfg.training.online.reverse_ratio)

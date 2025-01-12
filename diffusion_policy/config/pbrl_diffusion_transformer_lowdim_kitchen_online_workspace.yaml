@@ -74,33 +74,33 @@ policy:
 ema:
   _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
   update_after_step: 0
-  inv_gamma: 1.0
-  power: 0.75
+  inv_gamma: 2.0 #1.0
+  power: 0.9 #0.75
   min_value: 0.0
   max_value: 0.9999
 
 dataloader:
-  batch_size: 15
+  batch_size: 45
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 15
+  batch_size: 45
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 optimizer:
-  learning_rate: 1.0e-6
+  learning_rate: 2.0e-6
   weight_decay: 1.0e-5
   betas: [0.9, 0.99]
 
 training:
   device_cpu: "cpu"
-  device_gpu: "cuda:0"
+  device_gpu: "cuda:1"
   seed: 42
   debug: False
   resume: True
@@ -108,7 +108,7 @@ training:
   lr_scheduler: cosine
   # Transformer needs LR warmup
   lr_warmup_steps: 0
-  num_epochs: 15
+  num_epochs: 20
   # lr_end: 1.0e-8
   # power: 1.5
   gradient_accumulate_every: 1
@@ -135,7 +135,7 @@ training:
     update_history: False
   map:
     use_map: True # only true when use our method
-    map_ratio: 0.25
+    map_ratio: 0.2
 
 
 logging:

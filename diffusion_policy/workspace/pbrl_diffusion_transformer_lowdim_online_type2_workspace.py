@@ -29,7 +29,7 @@ from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
 from diffusion_policy.common.prior_utils_confidence import BetaNetwork
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 from diffusion_policy.policy.base_lowdim_policy import BaseLowdimPolicy
-from diffusion_policy.policy.ours_diffusion_transformer_lowdim_policy import DiffusionTransformerLowdimPolicy
+from diffusion_policy.policy.diffusion_transformer_lowdim_policy import DiffusionTransformerLowdimPolicy
 from diffusion_policy.dataset.base_dataset import BaseLowdimDataset
 from diffusion_policy.env_runner.base_lowdim_runner import BaseLowdimRunner
 from diffusion_policy.common.checkpoint_util import TopKCheckpointManager
@@ -124,6 +124,34 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
         # cut online groups
         votes_1, votes_2 = pref_dataset.pref_replay_buffer.meta['votes'], pref_dataset.pref_replay_buffer.meta['votes_2']
+
+        # normalization votes
+        votes_concat = np.concatenate((votes_1, votes_2), axis=1)
+        votes_mean = votes_concat.mean()
+        votes_std = votes_concat.std()
+
+        votes_1 = np.clip(votes_1, votes_mean - 3 * votes_std, votes_mean + 3 * votes_std)
+        votes_2 = np.clip(votes_2, votes_mean - 3 * votes_std, votes_mean + 3 * votes_std)
+
+        votes_concat = np.concatenate((votes_1, votes_2), axis=1)
+        votes_mean = votes_concat.mean()
+        votes_std = votes_concat.std()
+
+        votes_1 = (votes_1 - votes_mean) / (votes_std + 1e-8)
+        votes_2 = (votes_2 - votes_mean) / (votes_std + 1e-8)
+
+        votes_concat = np.concatenate((votes_1, votes_2), axis=1)
+        votes_min = votes_concat.min()
+        votes_max = votes_concat.max()
+
+        votes_1_norm = (votes_1 - votes_min) / (votes_max - votes_min + 1e-8)
+        votes_2_norm = (votes_2 - votes_min) / (votes_max - votes_min + 1e-8)
+
+        scale_factor = 10
+        votes_1 = votes_1_norm * scale_factor
+        votes_2 = votes_2_norm * scale_factor
+
+        #select uncertain samples
         var = (votes_1 * votes_2) / (((votes_1 + votes_2) ** 2) * (votes_1 + votes_2 + 1))
         var_flat = var.flatten()
         count = int(len(var_flat) * cfg.training.online.reverse_ratio)
@@ -163,6 +191,8 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         #     pref_dataset.set_beta_priori(data_size=150)
         #     pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=40, warm_up_epochs=5, batch_size=5, lr=1.0e-5)
         #     pref_dataset.update_beta_priori()
+        if cfg.training.map.use_map:
+            pref_dataset.set_beta_priori(data_size=150)
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset, dataset_1, dataset_2
@@ -240,8 +270,12 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
                 pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
 
-                pref_dataset.set_beta_priori(data_size=150)
-                pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=30, warm_up_epochs=4, batch_size=5, lr=1.0e-5)
+                pref_dataset.beta_model.online_update(
+                    dataset=pref_dataset.construct_pref_data(), 
+                    num_epochs=50 if online_epoch_idx==0 else 35, 
+                    warm_up_epochs=5 if online_epoch_idx==0 else 0, 
+                    batch_size=5, 
+                    lr=2.0e-5 if online_epoch_idx==0 else 2.0e-6,)
                 pref_dataset.update_beta_priori()
 
                 self.model.map_ratio = (online_epoch_idx + 1) * cfg.training.map.map_ratio / (cfg.training.online.num_groups)
@@ -420,7 +454,7 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")), 
     config_name=pathlib.Path(__file__).stem)
 def main(cfg):
-    workspace = TrainDiffusionTransformerLowdimWorkspace(cfg)
+    workspace = PbrlDiffusionTransformerLowdimWorkspace(cfg)
     workspace.run()
 
 if __name__ == "__main__":

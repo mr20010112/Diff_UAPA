@@ -3,7 +3,7 @@ defaults:
   - task: lift_lowdim_abs
 
 name: train_bet_lowdim
-_target_: diffusion_policy.workspace.pbrl_bet_lowdim_online_type1_workspace.PbrlBETLowdimWorkspace
+_target_: diffusion_policy.workspace.pbrl_bet_lowdim_online_workspace.PbrlBETLowdimWorkspace
 checkpoint_dir: 'data/experiments/low_dim/robomimic/lift/bet/base_0.5/epoch=0005-test_mean_score=0.520.ckpt'
 
 obs_dim: ${task.obs_dim}
