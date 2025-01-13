@@ -56,7 +56,7 @@ policy:
     action_dim: ${action_dim}
 
   gamma: ${gamma}
-  beta: 0.01667 #cpl:0.01667; dpo:0.025
+  beta: 0.0025 #cpl:0.01667; dpo:0.025; can_cpl:0.0025
   bias_reg: 0.25
   horizon: ${horizon}
   n_obs_steps: ${n_obs_steps}
@@ -77,7 +77,7 @@ val_dataloader:
   persistent_workers: False
 
 optimizer:
-  learning_rate: 5.0e-6 # 1e-4
+  learning_rate: 1.0e-6 # 1e-4
   weight_decay: 0.1
   betas: [0.9, 0.99]
 
@@ -91,14 +91,14 @@ training:
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 0
-  num_epochs: 70
+  num_epochs: 15
   gradient_accumulate_every: 1
   grad_norm_clip: 1.0
   enable_normalizer: True
   # training loop control
   # in epochs
-  rollout_every: 5
-  checkpoint_every: 5
+  rollout_every: 10
+  checkpoint_every: 10
   val_every: 1
   sample_every: 5
   # steps per epoch

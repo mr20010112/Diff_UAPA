@@ -4,7 +4,7 @@ defaults:
 
 name: train_diffusion_transformer_lowdim
 _target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type1_workspace.PbrlDiffusionTransformerLowdimWorkspace
-checkpoint_dir: 'data/experiments/low_dim/robomimic/lift/base_0.5/epoch=0050-test_mean_score=0.620.ckpt'
+checkpoint_dir: 'data/experiments/low_dim/robomimic/lift/diffusion_policy_transformer/base_0.5/epoch=0050-test_mean_score=0.620.ckpt'
 
 obs_dim: ${task.obs_dim}
 action_dim: ${task.action_dim}
@@ -22,7 +22,7 @@ obs_as_cond: True
 pred_action_steps_only: False
 
 policy: 
-  _target_: diffusion_policy.policy.cpl_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy
+  _target_: diffusion_policy.policy.ours_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy
 
   model: 
     _target_: diffusion_policy.model.diffusion.transformer_for_diffusion.TransformerForDiffusion
@@ -100,7 +100,7 @@ optimizer:
 
 training:
   device_cpu: "cpu"
-  device_gpu: "cuda:0"
+  device_gpu: "cuda:1"
   seed: 42
   debug: False
   resume: True
@@ -124,8 +124,8 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
-  dataset_1_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.5.h5'
-  dataset_2_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.5_2.h5'
+  dataset_1_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.4.h5'
+  dataset_2_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.7.h5'
   online:
     num_groups: 4
     all_votes: 100
@@ -134,7 +134,7 @@ training:
     reverse_freq: 1
     update_history: False
   map:
-    use_map: False
+    use_map: True # only true when use our method
     map_ratio: 0.25
 
 

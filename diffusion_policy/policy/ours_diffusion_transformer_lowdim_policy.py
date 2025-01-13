@@ -347,6 +347,8 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             immitation_loss = self.beta * 0.005 * self.noise_scheduler.config.num_train_timesteps * immitation_loss
 
             diff_loss = torch.mean(torch.abs(traj_loss_1 - traj_loss_2))
+            diff_map_loss_1 = torch.mean(torch.abs(traj_loss_1 - avg_traj_loss))
+            diff_map_loss_2 = torch.mean(torch.abs(traj_loss_2 - avg_traj_loss))
 
             mle_loss_1 = -F.logsigmoid(traj_loss_1 - traj_loss_2) + immitation_loss
             mle_loss_2 = -F.logsigmoid(traj_loss_2 - traj_loss_1) + immitation_loss
@@ -362,8 +364,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 # max_idx_1 = (beta_priori[:, 0] - 1) / (beta_priori[:, 0] + beta_priori[:, 1] - 2)
                 # max_idx_2 = (beta_priori_2[:, 0] - 1) / (beta_priori_2[:, 0] + beta_priori_2[:, 1] - 2)
 
-                diff_map_loss_1 = torch.mean(torch.abs(traj_loss_1 - avg_traj_loss))
-                diff_map_loss_2 = torch.mean(torch.abs(traj_loss_2 - avg_traj_loss))
+
 
                 map_loss_1 = - beta_dist.log_prob(torch.clamp(torch.sigmoid(traj_loss_1 - avg_traj_loss), min=1e-4, max=1-1e-4)) 
                            # + beta_dist.log_prob(torch.clamp(max_idx_1, min=1e-4, max=1-1e-4))

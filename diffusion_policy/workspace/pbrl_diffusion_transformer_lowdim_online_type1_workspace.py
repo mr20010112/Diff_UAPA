@@ -184,7 +184,7 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
 
             pref_dataset.set_beta_priori(data_size=150)
-            pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=30, warm_up_epochs=4, batch_size=5, lr=1.0e-5)
+            pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=50, warm_up_epochs=5, batch_size=5, lr=2.0e-5)
             pref_dataset.update_beta_priori()
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
@@ -255,18 +255,11 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             for online_epoch_idx in range(cfg.training.online.num_groups):
                 print(f"Round {online_epoch_idx + 1} of {cfg.training.online.num_groups} for online training")
 
-                if not cfg.training.online.update_history:
-                    local_votes_1 = np.array(all_votes_1[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \
-                                            (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
-                    
-                    local_votes_2 = np.array(all_votes_2[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \
-                                            (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
-                else:
-                    local_votes_1 = np.array(all_votes_1[:online_epoch_idx+1].T / (all_votes_1[:online_epoch_idx+1].T + \
-                                            all_votes_2[:online_epoch_idx+1].T), dtype=np.float32).reshape(-1, 1)
-                    
-                    local_votes_2 = np.array(all_votes_2[:online_epoch_idx+1].T / (all_votes_1[:online_epoch_idx+1].T + \
-                                            all_votes_2[:online_epoch_idx+1].T), dtype=np.float32).reshape(-1, 1)
+                local_votes_1 = np.array(all_votes_1[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \
+                                        (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
+                
+                local_votes_2 = np.array(all_votes_2[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \
+                                        (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
 
                 pref_dataset.pref_replay_buffer.meta['votes'] = local_votes_1
                 pref_dataset.pref_replay_buffer.meta['votes_2'] = local_votes_2

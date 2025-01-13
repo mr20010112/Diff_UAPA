@@ -3,8 +3,9 @@ defaults:
   - task: kitchen_lowdim_hdf5_abs
 
 name: train_bet_lowdim
-_target_: diffusion_policy.workspace.pbrl_bet_lowdim_online_type1_workspace.PbrlBETLowdimWorkspace
-checkpoint_dir: 'data/experiments/low_dim/robomimic/lift/bet/base_0.5/epoch=0005-test_mean_score=0.520.ckpt'
+_target_: diffusion_policy.workspace.pbrl_bet_lowdim_online_workspace.PbrlBETLowdimWorkspace
+checkpoint_dir: 'data/experiments/low_dim/kitchen/bet/base/epoch=0050-test_mean_score=0.486.ckpt'
+
 
 obs_dim: ${task.obs_dim}
 action_dim: ${task.action_dim}
@@ -56,7 +57,7 @@ policy:
     action_dim: ${action_dim}
 
   gamma: ${gamma}
-  beta: 1 #cpl 0.5 #dpo 1
+  beta: 0.25 #cpl 0.5 #dpo 1
   horizon: ${horizon}
   n_obs_steps: ${n_obs_steps}
   n_action_steps: ${n_action_steps}
@@ -76,14 +77,14 @@ val_dataloader:
   persistent_workers: False
 
 optimizer:
-  learning_rate: 1e-6 # 1e-4
-  weight_decay: 0.01
+  learning_rate: 5e-7 # 1e-4
+  weight_decay: 0.1
   betas: [0.9, 0.99]
 
 training:
   device_cpu: "cpu"
-  device_gpu: "cuda:1"
-  seed: 42
+  device_gpu: "cuda:0"
+  seed: 43
   debug: False
   resume: True
   # optimization

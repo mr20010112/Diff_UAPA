@@ -243,15 +243,15 @@ class BETLowdimPolicy(BaseLowdimPolicy):
             enc_obs_1 = self.obs_encoding_net(obs_1_slide)
             latent_1 = self.action_ae.encode_into_latent(action_1_slide, enc_obs_1)
 
-            # loss_1 = self.get_pred_loss(
-            #     obs_rep=enc_obs_1.clone(),
-            #     target_latents=latent_1,
-            # )
-
-            _, loss_1 = self.state_prior.get_latent_and_loss(
+            loss_1 = self.get_pred_loss(
                 obs_rep=enc_obs_1.clone(),
                 target_latents=latent_1,
             )
+
+            # _, loss_1 = self.state_prior.get_latent_and_loss(
+            #     obs_rep=enc_obs_1.clone(),
+            #     target_latents=latent_1,
+            # )
 
             #traj_loss_1 += -torch.norm(action_1_slide-pred_action_1['action'], dim=-1)*(self.gamma ** (i*self.n_action_steps + torch.arange(0, self.n_action_steps, device=self.device))).reshape(1,-1)
             traj_loss_1 = traj_loss_1 - ((loss_1)*torch.tensor(self.gamma**(i*self.horizon), device=self.device))
@@ -264,15 +264,15 @@ class BETLowdimPolicy(BaseLowdimPolicy):
             enc_obs_2 = self.obs_encoding_net(obs_2_slide)
             latent_2 = self.action_ae.encode_into_latent(action_2_slide, enc_obs_2)
 
-            # loss_2 = self.get_pred_loss(
-            #     obs_rep=enc_obs_2.clone(),
-            #     target_latents=latent_2,
-            # )
-
-            _, loss_2 = self.state_prior.get_latent_and_loss(
+            loss_2 = self.get_pred_loss(
                 obs_rep=enc_obs_2.clone(),
                 target_latents=latent_2,
             )
+
+            # _, loss_2 = self.state_prior.get_latent_and_loss(
+            #     obs_rep=enc_obs_2.clone(),
+            #     target_latents=latent_2,
+            # )
 
             #traj_loss_2 += -torch.norm(action_2_slide-pred_action_2['action'], dim=-1)*(self.gamma ** (i*self.n_action_steps + torch.arange(0, self.n_action_steps, device=self.device))).reshape(1,-1)
             traj_loss_2 = traj_loss_2 - ((loss_2)*torch.tensor(self.gamma**(i*self.horizon), device=self.device))
@@ -286,6 +286,6 @@ class BETLowdimPolicy(BaseLowdimPolicy):
         mle_loss_1 = -F.logsigmoid(self.beta*(traj_loss_1 - self.bias_reg * traj_loss_2)) + immatation_loss_1/(2*len(obs_1)*self.n_obs_steps) + immatation_loss_2/(2*len(obs_2)*self.n_obs_steps)
         mle_loss_2 = -F.logsigmoid(self.beta*(traj_loss_2 - self.bias_reg * traj_loss_1)) + immatation_loss_1/(2*len(obs_1)*self.n_obs_steps) + immatation_loss_2/(2*len(obs_2)*self.n_obs_steps)
 
-        loss += immatation_loss_1+immatation_loss_2 #(votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2)
+        loss += (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2) #(votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2)
 
         return torch.mean(loss)

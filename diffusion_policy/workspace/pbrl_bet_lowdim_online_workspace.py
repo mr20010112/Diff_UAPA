@@ -100,11 +100,6 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
 
         self.policy.set_normalizer(normalizer)
 
-        # fit action_ae (K-Means)
-        self.policy.fit_action_ae(
-                normalizer['action'].normalize(
-                    dataset.get_all_actions()))
-
         # configure dataset
         dataset_1: BaseLowdimDataset
         dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
