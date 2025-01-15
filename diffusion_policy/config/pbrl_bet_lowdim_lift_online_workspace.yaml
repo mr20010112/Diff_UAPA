@@ -24,7 +24,7 @@ obs_as_global_cond: False
 pred_action_steps_only: False
 
 policy:
-  _target_: diffusion_policy.policy.dpo_bet_lowdim_policy.BETLowdimPolicy
+  _target_: diffusion_policy.policy.dpo_bet_lowdim_policy.BETLowdimPolicy #dpo_, cpl_
 
   action_ae:
     _target_: diffusion_policy.model.bet.action_ae.discretizers.k_means.KMeansDiscretizer
@@ -56,29 +56,29 @@ policy:
     action_dim: ${action_dim}
 
   gamma: ${gamma}
-  beta: 0.025 #cpl:0.0025; dpo:0.025
+  beta: 0.125 #cpl:0.005; dpo:0.125
   bias_reg: 0.25
   horizon: ${horizon}
   n_obs_steps: ${n_obs_steps}
   n_action_steps: ${n_action_steps}
 
 dataloader:
-  batch_size: 15
+  batch_size: 45
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 15
+  batch_size: 45
   num_workers: 1
   shuffle: False
   pin_memory: True
   persistent_workers: False
 
 optimizer:
-  learning_rate: 0.00001 # 1e-4
-  weight_decay: 0.01
+  learning_rate: 1e-5 # 1e-4
+  weight_decay: 0.1
   betas: [0.9, 0.99]
 
 
@@ -106,7 +106,7 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
-  dataset_1_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.4.h5'
+  dataset_1_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.7.h5'
   dataset_2_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.7.h5'
   online:
     num_groups: 4

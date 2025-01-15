@@ -9,7 +9,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "--config-name=pbrl_bet_lowdim_kitchen_online_workspace.yaml"
+                "--config-name=pbrl_bet_lowdim_lift_online_workspace.yaml"
             ]
         }
     ]
