@@ -4,7 +4,7 @@ defaults:
 
 name: train_diffusion_transformer_lowdim
 _target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type1_workspace.PbrlDiffusionTransformerLowdimWorkspace
-checkpoint_dir: 'data/experiments/low_dim/robomimic/lift/diffusion_policy_transformer/base_0.5/epoch=0050-test_mean_score=0.620.ckpt'
+checkpoint_dir: 'data/experiments/low_dim/robomimic/can/bet/base/epoch=0004-test_mean_score=0.560.ckpt'
 
 obs_dim: ${task.obs_dim}
 action_dim: ${task.action_dim}
@@ -95,7 +95,7 @@ val_dataloader:
 
 optimizer:
   learning_rate: 1.0e-6
-  weight_decay: 1.0e-3
+  weight_decay: 5.0e-4
   betas: [0.9, 0.95]
 
 training:
@@ -124,8 +124,8 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
-  dataset_1_dir: 'data/robomimic/datasets/can/normal/robomimic_data_0.5.h5'
-  dataset_2_dir: 'data/robomimic/datasets/can/normal/robomimic_data_0.6.h5'
+  dataset_1_dir: 'data/robomimic/datasets/can/normal/can_lowdimabs_data_0.5.h5'
+  dataset_2_dir: 'data/robomimic/datasets/can/normal/can_lowdimabs_data_0.5_2.h5'
   online:
     num_groups: 4
     all_votes: 100
@@ -134,7 +134,7 @@ training:
     reverse_freq: 1
     update_history: False
   map:
-    use_map: True # only true when use our method
+    use_map: False # only true when use our method
     map_ratio: 0.2
 
 

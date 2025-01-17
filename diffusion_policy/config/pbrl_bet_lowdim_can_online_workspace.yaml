@@ -56,7 +56,7 @@ policy:
     action_dim: ${action_dim}
 
   gamma: ${gamma}
-  beta: 0.0025 #cpl:0.01667; dpo:0.025; can_cpl:0.0025
+  beta: 0.005 #cpl:0.01667; dpo:0.025; can_cpl:0.005
   bias_reg: 0.25
   horizon: ${horizon}
   n_obs_steps: ${n_obs_steps}
@@ -78,8 +78,8 @@ val_dataloader:
 
 optimizer:
   learning_rate: 1.0e-6 # 1e-4
-  weight_decay: 0.1
-  betas: [0.9, 0.99]
+  weight_decay: 0.05
+  betas: [0.95, 0.999]
 
 
 training:
@@ -106,8 +106,8 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
-  dataset_1_dir: 'data/robomimic/datasets/can/normal/robomimic_data_0.6.h5'
-  dataset_2_dir: 'data/robomimic/datasets/can/normal/robomimic_data_0.6.h5'
+  dataset_1_dir: 'data/robomimic/datasets/can/normal/can_lowdim_data_0.5.h5'
+  dataset_2_dir: 'data/robomimic/datasets/can/normal/can_lowdim_data_0.5_2.h5'
   online:
     num_groups: 4
     all_votes: 100

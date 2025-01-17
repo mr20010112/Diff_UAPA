@@ -200,19 +200,12 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         observations_1 = batch["obs"].to(self.device)
         actions_1 = batch["action"].to(self.device)
         votes_1 = batch["votes"].to(self.device)
-        # votes_1[votes_1 == 0.5] = 0
         beta_priori = batch["beta_priori"].to(self.device)
         observations_2 = batch["obs_2"].to(self.device)
         actions_2 = batch["action_2"].to(self.device)
         votes_2 = batch["votes_2"].to(self.device)
-        # votes_2[votes_2 == 0.5] = 0
         beta_priori_2 = batch["beta_priori_2"].to(self.device)
         save_avg_traj_loss = torch.tensor(avg_traj_loss, device=self.device).detach()
-        # length = batch["length"]
-        # length_2 = batch["length_2"]
-
-        # beta_priori = beta_priori + 1
-        # beta_priori_2 = beta_priori_2 + 1
 
         threshold = 1e-2
         diff = torch.abs(votes_1 - votes_2)
@@ -228,13 +221,13 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         
 
         batch_1 = {
-            'obs': torch.tensor(observations_1, device=self.device),
-            'action': torch.tensor(actions_1, device=self.device),
+            'obs': torch.tensor(observations_1, device=self.device).detach(),
+            'action': torch.tensor(actions_1, device=self.device).detach(),
         }
 
         batch_2 = {
-            'obs': torch.tensor(observations_2, device=self.device),
-            'action': torch.tensor(actions_2, device=self.device),
+            'obs': torch.tensor(observations_2, device=self.device).detach(),
+            'action': torch.tensor(actions_2, device=self.device).detach(),
         }
 
 
@@ -339,9 +332,10 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             traj_loss_1 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_1
             traj_loss_2 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_2
             avg_traj_loss = -self.beta * self.noise_scheduler.config.num_train_timesteps * avg_traj_loss
-            immitation_loss = -self.beta * 0.05 * self.noise_scheduler.config.num_train_timesteps * immitation_loss 
+            immitation_loss = -self.beta * 0.5 * self.noise_scheduler.config.num_train_timesteps * torch.mean(immitation_loss)
 
-            diff_loss = torch.mean(torch.abs(traj_loss_1 - traj_loss_2))
+            diff_loss_1 = torch.mean(torch.abs(traj_loss_1 - traj_loss_2 + immitation_loss))
+            diff_loss_2 = torch.mean(torch.abs(traj_loss_2 - traj_loss_1 + immitation_loss))
 
             mle_loss_1 = -F.logsigmoid(traj_loss_1 - traj_loss_2 + immitation_loss)
             mle_loss_2 = -F.logsigmoid(traj_loss_2 - traj_loss_1 + immitation_loss)

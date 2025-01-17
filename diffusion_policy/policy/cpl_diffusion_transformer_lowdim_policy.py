@@ -329,6 +329,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
 
             traj_loss_1 = torch.sum(traj_loss_1, dim=-1)
             traj_loss_2 = torch.sum(traj_loss_2, dim=-1)
+            immitation_loss = traj_loss_1 + traj_loss_2
 
             # term = torch.ones(timesteps.shape, device=self.device)
 
@@ -336,11 +337,11 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             traj_loss_2 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_2
 
 
-            diff_loss_1 = torch.mean(traj_loss_1 - self.bias_reg*traj_loss_2)
-            diff_loss_2 = torch.mean(traj_loss_2 - self.bias_reg*traj_loss_1)
+            diff_loss_1 = torch.mean(torch.abs(traj_loss_1 - self.bias_reg*traj_loss_2))
+            diff_loss_2 = torch.mean(torch.abs(traj_loss_2 - self.bias_reg*traj_loss_1))
 
-            mle_loss_1 = -F.logsigmoid(traj_loss_1 - self.bias_reg*traj_loss_2)
-            mle_loss_2 = -F.logsigmoid(traj_loss_2 - self.bias_reg*traj_loss_1)
+            mle_loss_1 = -F.logsigmoid(traj_loss_1 - self.bias_reg*traj_loss_2) + immitation_loss / ((len(obs_1)+len(obs_2))*self.horizon)
+            mle_loss_2 = -F.logsigmoid(traj_loss_2 - self.bias_reg*traj_loss_1) + immitation_loss / ((len(obs_1)+len(obs_2))*self.horizon)
 
 
             loss += (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2) / (2 * self.train_time_samples[0]) 
