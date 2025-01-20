@@ -71,4 +71,4 @@ pref_dataset:
   N: 500
   gamma: ${gamma}
   gpu_device: ${training.device_gpu}
-  save_dir: data/pref_data/robomimic/lift
+  # save_dir: data/pref_data/robomimic/lift

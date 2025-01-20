@@ -147,17 +147,18 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         votes_1_norm = (votes_1 - votes_min) / (votes_max - votes_min + 1e-8)
         votes_2_norm = (votes_2 - votes_min) / (votes_max - votes_min + 1e-8)
 
-        scale_factor = 10
+        scale_factor = 5
         votes_1 = votes_1_norm * scale_factor
         votes_2 = votes_2_norm * scale_factor
 
         #select uncertain samples
         var = (votes_1 * votes_2) / (((votes_1 + votes_2) ** 2) * (votes_1 + votes_2 + 1))
+        var[np.isnan(var)] = 1e6
         var_flat = var.flatten()
         count = int(len(var_flat) * cfg.training.online.reverse_ratio)
         threshold = np.partition(var_flat, -count)[-count]
         indices = np.where(var_flat >= threshold)[0]
-        ratio_1, ratio_2 = votes_1 / (votes_1 + votes_2), votes_2 / (votes_1 + votes_2)
+        ratio_1, ratio_2 = votes_1 / (votes_1 + votes_2 + 1e-06), votes_2 / (votes_1 + votes_2 + 1e-06)
 
         all_votes_1 = np.array([np.round(ratio_1 * (cfg.training.online.all_votes / cfg.training.online.num_groups)) for _ in range(cfg.training.online.num_groups)])
         all_votes_2 = np.array([np.round(ratio_2 * (cfg.training.online.all_votes / cfg.training.online.num_groups)) for _ in range(cfg.training.online.num_groups)])
@@ -328,8 +329,6 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                                 avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
                                                                       model = self.model, ref_model = ref_policy.model)
                             raw_loss = self.model.compute_loss(batch, ref_model=ref_policy.model, avg_traj_loss = avg_traj_loss)
-                            # map_loss_batch_numpy = [tensor.detach().cpu().numpy() for tensor in map_loss_batch]
-                            # map_loss.append(map_loss_batch_numpy)
                             loss = raw_loss / cfg.training.gradient_accumulate_every
                             loss.backward()
 

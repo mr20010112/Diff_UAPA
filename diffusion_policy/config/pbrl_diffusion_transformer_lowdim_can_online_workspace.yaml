@@ -1,10 +1,10 @@
 defaults:
   - _self_
-  - task: can_lowdim_abs #kitchen_lowdim_abs
+  - task: can_lowdim_abs 
 
 name: train_diffusion_transformer_lowdim
 _target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type1_workspace.PbrlDiffusionTransformerLowdimWorkspace
-checkpoint_dir: 'data/experiments/low_dim/robomimic/can/bet/base/epoch=0004-test_mean_score=0.560.ckpt'
+checkpoint_dir: 'data/experiments/low_dim/robomimic/can/diff/base/epoch=0070-test_mean_score=0.600.ckpt'
 
 obs_dim: ${task.obs_dim}
 action_dim: ${task.action_dim}
@@ -30,7 +30,7 @@ policy:
     output_dim: 10
     horizon: ${horizon}
     n_obs_steps: ${n_obs_steps}
-    cond_dim: 23
+    cond_dim: ${obs_dim}
 
     n_layer: 8
     n_head: 4
@@ -54,7 +54,7 @@ policy:
     prediction_type: epsilon # or sample
 
   gamma: ${gamma}
-  beta: 0.00003125 #dpo:0.0005; cpl:0.00003125
+  beta: 4.0e-5 #dpo:2.0e-5; cpl:4.0e-6
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
   bias_reg: 0.25
@@ -74,27 +74,27 @@ policy:
 ema:
   _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
   update_after_step: 0
-  inv_gamma: 1.5
-  power: 0.8
+  inv_gamma: 1.0
+  power: 0.75
   min_value: 0.0
   max_value: 0.9999
 
 dataloader:
-  batch_size: 60
+  batch_size: 50
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 60
+  batch_size: 50
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 optimizer:
-  learning_rate: 1.0e-6
+  learning_rate: 1.0e-5
   weight_decay: 5.0e-4
   betas: [0.9, 0.95]
 
@@ -124,8 +124,8 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
-  dataset_1_dir: 'data/robomimic/datasets/can/normal/can_lowdimabs_data_0.5.h5'
-  dataset_2_dir: 'data/robomimic/datasets/can/normal/can_lowdimabs_data_0.5_2.h5'
+  dataset_1_dir: 'data/robomimic/datasets/can/normal/can_lowdimabs_data_0.5_5.h5'
+  dataset_2_dir: 'data/robomimic/datasets/can/normal/can_lowdimabs_data_0.5_6.h5'
   online:
     num_groups: 4
     all_votes: 100

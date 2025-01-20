@@ -200,19 +200,11 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         observations_1 = batch["obs"].to(self.device)
         actions_1 = batch["action"].to(self.device)
         votes_1 = batch["votes"].to(self.device)
-        # votes_1[votes_1 == 0.5] = 0
-        beta_priori = batch["beta_priori"].to(self.device)
+
         observations_2 = batch["obs_2"].to(self.device)
         actions_2 = batch["action_2"].to(self.device)
         votes_2 = batch["votes_2"].to(self.device)
-        # votes_2[votes_2 == 0.5] = 0
-        beta_priori_2 = batch["beta_priori_2"].to(self.device)
 
-        # length = batch["length"]
-        # length_2 = batch["length_2"]
-
-        # beta_priori = beta_priori + 1
-        # beta_priori_2 = beta_priori_2 + 1
 
         threshold = 1e-2
         diff = torch.abs(votes_1 - votes_2)
@@ -261,7 +253,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
 
             traj_loss_1, traj_loss_2 = 0, 0
             # mseloss_1, mseloss_2 = 0, 0
-            condition_mask = []
 
             for i in range(len(obs_1)):
                 obs_1_slide = obs_1[i]
@@ -278,7 +269,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                     trajectory_1 = torch.cat([action_1_slide, obs_1_slide], dim=-1)
                 trajectory_1 = trajectory_1.to(self.device)
                 condition_mask_1 = self.mask_generator(trajectory_1.shape).to(self.device)
-                condition_mask.append(condition_mask_1)
                 noise_1 = torch.randn(trajectory_1.shape, device=self.device)
                 noisy_trajectory_1 = self.noise_scheduler.add_noise(trajectory_1, noise_1, timesteps)
 
@@ -309,7 +299,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                     trajectory_2 = torch.cat([action_2_slide, obs_2_slide], dim=-1)
                 trajectory_2 = trajectory_2.to(self.device)
                 # condition_mask_2 = self.mask_generator(trajectory_2.shape).to(self.device)
-                condition_mask_2 = condition_mask[i]
+                condition_mask_2 = self.mask_generator(trajectory_2.shape).to(self.device)
                 noise_2 = torch.randn(trajectory_2.shape, device=self.device)
                 noisy_trajectory_2 = self.noise_scheduler.add_noise(trajectory_2, noise_2, timesteps)
 

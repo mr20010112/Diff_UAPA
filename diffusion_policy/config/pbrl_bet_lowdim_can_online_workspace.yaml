@@ -24,7 +24,7 @@ obs_as_global_cond: False
 pred_action_steps_only: False
 
 policy:
-  _target_: diffusion_policy.policy.cpl_bet_lowdim_policy.BETLowdimPolicy
+  _target_: diffusion_policy.policy.dpo_bet_lowdim_policy.BETLowdimPolicy
 
   action_ae:
     _target_: diffusion_policy.model.bet.action_ae.discretizers.k_means.KMeansDiscretizer
@@ -56,21 +56,21 @@ policy:
     action_dim: ${action_dim}
 
   gamma: ${gamma}
-  beta: 0.005 #cpl:0.01667; dpo:0.025; can_cpl:0.005
+  beta: 0.125 #dpo:0.125; cpl:0.005
   bias_reg: 0.25
   horizon: ${horizon}
   n_obs_steps: ${n_obs_steps}
   n_action_steps: ${n_action_steps}
 
 dataloader:
-  batch_size: 45
+  batch_size: 100
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 45
+  batch_size: 100
   num_workers: 1
   shuffle: False
   pin_memory: True
@@ -78,8 +78,8 @@ val_dataloader:
 
 optimizer:
   learning_rate: 1.0e-6 # 1e-4
-  weight_decay: 0.05
-  betas: [0.95, 0.999]
+  weight_decay: 0.1
+  betas: [0.9, 0.99]
 
 
 training:
@@ -106,8 +106,8 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
-  dataset_1_dir: 'data/robomimic/datasets/can/normal/can_lowdim_data_0.5.h5'
-  dataset_2_dir: 'data/robomimic/datasets/can/normal/can_lowdim_data_0.5_2.h5'
+  dataset_1_dir: 'data/robomimic/datasets/can/normal/can_lowdim_data_0.5_3.h5'
+  dataset_2_dir: 'data/robomimic/datasets/can/normal/can_lowdim_data_0.5_4.h5'
   online:
     num_groups: 4
     all_votes: 100

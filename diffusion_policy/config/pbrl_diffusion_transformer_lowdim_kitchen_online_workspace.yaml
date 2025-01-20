@@ -4,7 +4,7 @@ defaults:
 
 name: train_diffusion_transformer_lowdim
 _target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type1_workspace.PbrlDiffusionTransformerLowdimWorkspace
-checkpoint_dir: 'data/experiments/low_dim/kitchen/diffusion_policy_transformer/base_0.5/seed=42.ckpt'
+checkpoint_dir: 'data/experiments/low_dim/kitchen/diff/base_0.5/seed=42.ckpt'
 
 obs_dim: ${task.obs_dim}
 action_dim: ${task.action_dim}
@@ -22,7 +22,7 @@ obs_as_cond: True
 pred_action_steps_only: False
 
 policy: 
-  _target_: diffusion_policy.policy.ours_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_diffusion_transformer_lowdim_policy, dpo_diffusion_transformer_lowdim_policy, ours_diffusion_transformer_lowdim_policy
+  _target_: diffusion_policy.policy.dpo_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_
 
   model: 
     _target_: diffusion_policy.model.diffusion.transformer_for_diffusion.TransformerForDiffusion
@@ -54,7 +54,7 @@ policy:
     prediction_type: epsilon # or sample
 
   gamma: ${gamma}
-  beta: 0.001428 #ours:0.001428
+  beta: 0.00018 #ours:0.001428; dpo:0.00018
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
   bias_reg: 0.25
@@ -74,8 +74,8 @@ policy:
 ema:
   _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
   update_after_step: 0
-  inv_gamma: 2.0 #1.0
-  power: 0.9 #0.75
+  inv_gamma: 1.0 #1.0
+  power: 0.8 #0.75
   min_value: 0.0
   max_value: 0.9999
 
@@ -95,8 +95,8 @@ val_dataloader:
 
 optimizer:
   learning_rate: 5.0e-7
-  weight_decay: 1.0e-5
-  betas: [0.9, 0.99]
+  weight_decay: 5.0e-5
+  betas: [0.95, 0.999]
 
 training:
   device_cpu: "cpu"
@@ -134,7 +134,7 @@ training:
     reverse_freq: 1
     update_history: False
   map:
-    use_map: True # only true when use our method
+    use_map: False # only true when use our method
     map_ratio: 0.2
 
 

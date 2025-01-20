@@ -200,11 +200,9 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         observations_1 = batch["obs"].to(self.device)
         actions_1 = batch["action"].to(self.device)
         votes_1 = batch["votes"].to(self.device)
-        beta_priori = batch["beta_priori"].to(self.device)
         observations_2 = batch["obs_2"].to(self.device)
         actions_2 = batch["action_2"].to(self.device)
         votes_2 = batch["votes_2"].to(self.device)
-        beta_priori_2 = batch["beta_priori_2"].to(self.device)
         save_avg_traj_loss = torch.tensor(avg_traj_loss, device=self.device).detach()
 
         threshold = 1e-2
@@ -221,13 +219,13 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         
 
         batch_1 = {
-            'obs': torch.tensor(observations_1, device=self.device).detach(),
-            'action': torch.tensor(actions_1, device=self.device).detach(),
+            'obs': torch.tensor(observations_1, device=self.device),
+            'action': torch.tensor(actions_1, device=self.device),
         }
 
         batch_2 = {
-            'obs': torch.tensor(observations_2, device=self.device).detach(),
-            'action': torch.tensor(actions_2, device=self.device).detach(),
+            'obs': torch.tensor(observations_2, device=self.device),
+            'action': torch.tensor(actions_2, device=self.device),
         }
 
 
@@ -241,10 +239,10 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         action_2 = nbatch_2['action']
         # del nbatch_1, nbatch_2, batch_1, batch_2
 
-        obs_1 = slice_episode(obs_1, horizon=self.horizon, stride=self.n_action_steps)
-        action_1 = slice_episode(action_1, horizon=self.horizon, stride=self.n_action_steps)
-        obs_2 = slice_episode(obs_2, horizon=self.horizon, stride=self.n_action_steps)
-        action_2 = slice_episode(action_2, horizon=self.horizon, stride=self.n_action_steps)
+        obs_1 = slice_episode(obs_1, horizon=self.horizon, stride=self.horizon)
+        action_1 = slice_episode(action_1, horizon=self.horizon, stride=self.horizon)
+        obs_2 = slice_episode(obs_2, horizon=self.horizon, stride=self.horizon)
+        action_2 = slice_episode(action_2, horizon=self.horizon, stride=self.horizon)
 
         bsz = obs_1[0].shape[0]
         loss = 0
@@ -254,9 +252,9 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
 
             traj_loss_1, traj_loss_2, immitation_loss, avg_traj_loss = 0, 0, 0, save_avg_traj_loss
             # mseloss_1, mseloss_2 = 0, 0
-            condition_mask = []
 
             for i in range(len(obs_1)):
+                cond_1 = None
                 obs_1_slide = obs_1[i]
                 action_1_slide = action_1[i]
 
@@ -266,12 +264,17 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                     cond_1 = obs_1_slide[:, :self.n_obs_steps, :]
                     cond_1 = cond_1.to(self.device)
                     if self.pred_action_steps_only:
-                        trajectory_1 = action_1_slide[:, -self.n_action_steps:]
+                        To = self.n_obs_steps
+                        start = To - 1
+                        end = start + self.n_action_steps
+                        trajectory_1 = action_1_slide[:, start:end]
                 else:
                     trajectory_1 = torch.cat([action_1_slide, obs_1_slide], dim=-1)
                 trajectory_1 = trajectory_1.to(self.device)
-                condition_mask_1 = self.mask_generator(trajectory_1.shape).to(self.device)
-                condition_mask.append(condition_mask_1)
+                if self.pred_action_steps_only:
+                    condition_mask_1 = torch.zeros_like(trajectory_1, dtype=torch.bool)
+                else:
+                    condition_mask_1 = self.mask_generator(trajectory_1.shape).to(self.device)
                 noise_1 = torch.randn(trajectory_1.shape, device=self.device)
                 noisy_trajectory_1 = self.noise_scheduler.add_noise(trajectory_1, noise_1, timesteps)
 
@@ -283,27 +286,33 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 pred_type_1 = self.noise_scheduler.config.prediction_type
                 target = noise_1 if pred_type_1 == 'epsilon' else trajectory_1
 
-                slice_loss_1 = torch.norm((pred_1 - noise_1) * loss_mask_1.type(pred_1.dtype), dim=-1) ** 2 
-                # slice_loss_1 = F.mse_loss(pred_1 * loss_mask_1.type(pred_1.dtype), target * loss_mask_1.type(target.dtype), reduction='none')
+                slice_loss_1 = torch.norm((pred_1 - noise_1) * loss_mask_1.type(pred_1.dtype), dim=-1) ** 2
 
                 traj_loss_1 += slice_loss_1
                 immitation_loss += slice_loss_1
 
             for i in range(len(obs_2)):
+                cond_2 = None
                 obs_2_slide = obs_2[i]
                 action_2_slide = action_2[i]
 
                 trajectory_2 = action_2_slide
+                
                 if self.obs_as_cond:
                     cond_2 = obs_2_slide[:, :self.n_obs_steps, :]
                     cond_2 = cond_2.to(self.device)
                     if self.pred_action_steps_only:
-                        trajectory_2 = action_2_slide[:, -self.n_action_steps:]
+                        To = self.n_obs_steps
+                        start = To - 1
+                        end = start + self.n_action_steps
+                        trajectory_2 = action_2_slide[:, start:end]
                 else:
                     trajectory_2 = torch.cat([action_2_slide, obs_2_slide], dim=-1)
                 trajectory_2 = trajectory_2.to(self.device)
-                # condition_mask_2 = self.mask_generator(trajectory_2.shape).to(self.device)
-                condition_mask_2 = condition_mask[i]
+                if self.pred_action_steps_only:
+                    condition_mask_2 = torch.zeros_like(trajectory_2, dtype=torch.bool)
+                else:
+                    condition_mask_2 = self.mask_generator(trajectory_2.shape).to(self.device)
                 noise_2 = torch.randn(trajectory_2.shape, device=self.device)
                 noisy_trajectory_2 = self.noise_scheduler.add_noise(trajectory_2, noise_2, timesteps)
 
@@ -315,8 +324,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 pred_type_2 = self.noise_scheduler.config.prediction_type
                 target = noise_2 if pred_type_2 == 'epsilon' else trajectory_2
 
-                slice_loss_2 = torch.norm((pred_2 - noise_2) * loss_mask_2.type(pred_2.dtype), dim=-1) ** 2 
-                # slice_loss_2 = F.mse_loss(pred_2 * loss_mask_2.type(pred_2.dtype), target * loss_mask_2.type(target.dtype), reduction='none')
+                slice_loss_2 = torch.norm((pred_2 - noise_2) * loss_mask_2.type(pred_2.dtype), dim=-1) ** 2
 
                 traj_loss_2 += slice_loss_2
                 immitation_loss += slice_loss_2
@@ -332,7 +340,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             traj_loss_1 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_1
             traj_loss_2 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_2
             avg_traj_loss = -self.beta * self.noise_scheduler.config.num_train_timesteps * avg_traj_loss
-            immitation_loss = -self.beta * 0.5 * self.noise_scheduler.config.num_train_timesteps * torch.mean(immitation_loss)
+            immitation_loss = -self.beta * self.noise_scheduler.config.num_train_timesteps * 0.5 * torch.mean(immitation_loss)
 
             diff_loss_1 = torch.mean(torch.abs(traj_loss_1 - traj_loss_2 + immitation_loss))
             diff_loss_2 = torch.mean(torch.abs(traj_loss_2 - traj_loss_1 + immitation_loss))

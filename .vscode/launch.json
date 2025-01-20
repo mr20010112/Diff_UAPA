@@ -9,7 +9,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "--config-name=pbrl_bet_lowdim_can_online_workspace.yaml"
+                "--config-name=pbrl_diffusion_transformer_lowdim_can_online_workspace.yaml"
             ]
         }
     ]

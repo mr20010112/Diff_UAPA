@@ -21,9 +21,6 @@ import numpy as np
 import shutil
 import math
 import scipy.stats as stats
-import matplotlib.pyplot as plt
-from scipy.stats import beta
-from typing import Optional, Dict
 
 from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
 from diffusion_policy.common.prior_utils_confidence import BetaNetwork
@@ -142,17 +139,18 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         votes_1_norm = (votes_1 - votes_min) / (votes_max - votes_min + 1e-8)
         votes_2_norm = (votes_2 - votes_min) / (votes_max - votes_min + 1e-8)
 
-        scale_factor = 10
+        scale_factor = 5
         votes_1 = votes_1_norm * scale_factor
         votes_2 = votes_2_norm * scale_factor
 
         #select uncertain samples
         var = (votes_1 * votes_2) / (((votes_1 + votes_2) ** 2) * (votes_1 + votes_2 + 1))
+        var[np.isnan(var)] = 1e6
         var_flat = var.flatten()
         count = int(len(var_flat) * cfg.training.online.reverse_ratio)
         threshold = np.partition(var_flat, -count)[-count]
         indices = np.where(var_flat >= threshold)[0]
-        ratio_1, ratio_2 = votes_1 / (votes_1 + votes_2), votes_2 / (votes_1 + votes_2)
+        ratio_1, ratio_2 = votes_1 / (votes_1 + votes_2 + 1e-6), votes_2 / (votes_1 + votes_2 + 1e-6)
 
         all_votes_1 = np.array([np.round(ratio_1 * (cfg.training.online.all_votes / cfg.training.online.num_groups)) for _ in range(cfg.training.online.num_groups)])
         all_votes_2 = np.array([np.round(ratio_2 * (cfg.training.online.all_votes / cfg.training.online.num_groups)) for _ in range(cfg.training.online.num_groups)])
@@ -255,11 +253,9 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             for online_epoch_idx in range(cfg.training.online.num_groups):
                 print(f"Round {online_epoch_idx + 1} of {cfg.training.online.num_groups} for online training")
 
-                local_votes_1 = np.array(all_votes_1[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \
-                                        (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
+                local_votes_1 = np.array(all_votes_1[online_epoch_idx].T, dtype=np.float32).reshape(-1, 1)
                 
-                local_votes_2 = np.array(all_votes_2[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \
-                                        (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
+                local_votes_2 = np.array(all_votes_2[online_epoch_idx].T, dtype=np.float32).reshape(-1, 1)
 
                 pref_dataset.pref_replay_buffer.meta['votes'] = local_votes_1
                 pref_dataset.pref_replay_buffer.meta['votes_2'] = local_votes_2

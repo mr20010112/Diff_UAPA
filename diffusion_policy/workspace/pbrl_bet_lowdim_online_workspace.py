@@ -89,16 +89,16 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         assert isinstance(dataset, BaseLowdimDataset)
         # train_dataloader = DataLoader(dataset, **cfg.dataloader)
 
-        # set normalizer
-        normalizer = None
-        if cfg.training.enable_normalizer:
-            normalizer = dataset.get_normalizer()
-        else:
-            normalizer = LinearNormalizer()
-            normalizer['action'] = SingleFieldLinearNormalizer.create_identity()
-            normalizer['obs'] = SingleFieldLinearNormalizer.create_identity()
+        # # set normalizer
+        # normalizer = None
+        # if cfg.training.enable_normalizer:
+        #     normalizer = dataset.get_normalizer()
+        # else:
+        #     normalizer = LinearNormalizer()
+        #     normalizer['action'] = SingleFieldLinearNormalizer.create_identity()
+        #     normalizer['obs'] = SingleFieldLinearNormalizer.create_identity()
 
-        self.policy.set_normalizer(normalizer)
+        # self.policy.set_normalizer(normalizer)
 
         # configure dataset
         dataset_1: BaseLowdimDataset
@@ -140,17 +140,18 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         votes_1_norm = (votes_1 - votes_min) / (votes_max - votes_min + 1e-8)
         votes_2_norm = (votes_2 - votes_min) / (votes_max - votes_min + 1e-8)
 
-        scale_factor = 10
+        scale_factor = 5
         votes_1 = votes_1_norm * scale_factor
         votes_2 = votes_2_norm * scale_factor
 
         #select uncertain samples
         var = (votes_1 * votes_2) / (((votes_1 + votes_2) ** 2) * (votes_1 + votes_2 + 1))
+        var[np.isnan(var)] = 1e6
         var_flat = var.flatten()
         count = int(len(var_flat) * cfg.training.online.reverse_ratio)
         threshold = np.partition(var_flat, -count)[-count]
         indices = np.where(var_flat >= threshold)[0]
-        ratio_1, ratio_2 = votes_1 / (votes_1 + votes_2), votes_2 / (votes_1 + votes_2)
+        ratio_1, ratio_2 = votes_1 / (votes_1 + votes_2 + 1e-6), votes_2 / (votes_1 + votes_2 + 1e-6)
 
         all_votes_1 = np.array([np.round(ratio_1 * (cfg.training.online.all_votes / cfg.training.online.num_groups)) for _ in range(cfg.training.online.num_groups)])
         all_votes_2 = np.array([np.round(ratio_2 * (cfg.training.online.all_votes / cfg.training.online.num_groups)) for _ in range(cfg.training.online.num_groups)])
