@@ -32,7 +32,7 @@ env_runner:
   abs_action: *abs_action
   n_envs: 28
 
-dataset:
+origin_dataset:
   _target_: diffusion_policy.dataset.robomimic_replay_lowdim_dataset.RobomimicReplayLowdimDataset
   dataset_path: *dataset_path
   horizon: ${horizon}
@@ -44,3 +44,11 @@ dataset:
   seed: 42
   val_ratio: 0.02
   max_train_episodes: null
+
+pref_dataset:
+  _target_: diffusion_policy.dataset.pbrl_lowdim_dataset.Pbrl_Hdf5LowdimDataset
+  sequence_length: 180 #${task.env_runner.max_steps}
+  val_ratio: 0
+  N: 500
+  gamma: ${gamma}
+  gpu_device: ${training.device_gpu}

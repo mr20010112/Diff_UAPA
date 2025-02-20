@@ -1,0 +1,38 @@
+name: halfcheetah
+
+obs_dim: 17
+action_dim: 6
+keypoint_dim: 3
+
+dataset_path: &dataset_path data/d4rl/halfcheetah-medium-expert-v2.pkl
+
+env_runner:
+  _target_: diffusion_policy.env_runner.d4rl_lowdim_runner.D4rlEnvRunner
+  env_name: 'halfcheetah-medium-v0'
+  n_train: 6
+  n_test: 50
+  test_start_seed: 100000
+  # use python's eval function as resolver, single-quoted string as argument
+  max_steps: 1000
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${n_action_steps}
+  n_latency_steps: ${n_latency_steps}
+  past_action: ${past_action_visible}
+  n_envs: 56
+
+origin_dataset:
+  _target_: diffusion_policy.dataset.pkl_lowdim_dataset.PklLowdimDataset
+  dataset_path: *dataset_path
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+
+pref_dataset:
+  _target_: diffusion_policy.dataset.pbrl_lowdim_dataset.Pbrl_Hdf5LowdimDataset
+  sequence_length: 200 #200 #${task.env_runner.max_steps}
+  val_ratio: 0
+  N: 500
+  gamma: ${gamma}
+  gpu_device: ${training.device_gpu}

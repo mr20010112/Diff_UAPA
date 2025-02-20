@@ -21,6 +21,9 @@ import numpy as np
 import shutil
 import math
 import scipy.stats as stats
+import matplotlib.pyplot as plt
+from scipy.stats import beta
+from typing import Optional, Dict
 
 from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
 from diffusion_policy.common.prior_utils_confidence import BetaNetwork
@@ -98,21 +101,21 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         assert isinstance(dataset, BaseLowdimDataset)
         normalizer = dataset.get_normalizer()
 
-        # configure dataset
-        dataset_1: BaseLowdimDataset
-        dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
-        #device = torch.device(cfg.training.device_cpu)
-        assert isinstance(dataset_1, BaseLowdimDataset)
+        # # configure dataset
+        # dataset_1: BaseLowdimDataset
+        # dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
+        # #device = torch.device(cfg.training.device_cpu)
+        # assert isinstance(dataset_1, BaseLowdimDataset)
 
-        # configure dataset
-        dataset_2: BaseLowdimDataset
-        dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
-        # expert_normalizer = normal_dataset.get_normalizer()
-        assert isinstance(dataset_2, BaseLowdimDataset)
+        # # configure dataset
+        # dataset_2: BaseLowdimDataset
+        # dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
+        # # expert_normalizer = normal_dataset.get_normalizer()
+        # assert isinstance(dataset_2, BaseLowdimDataset)
 
         pref_dataset: BaseLowdimDataset
-        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset_1.replay_buffer, \
-                                               replay_buffer_2=dataset_2.replay_buffer) #cfg.task.perf_dataset
+        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset.replay_buffer, \
+                                               replay_buffer_2=dataset.replay_buffer) #cfg.task.perf_dataset
 
         # cut online groups
         votes_1, votes_2 = pref_dataset.pref_replay_buffer.meta['votes'], pref_dataset.pref_replay_buffer.meta['votes_2']
@@ -144,13 +147,16 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         votes_2 = votes_2_norm * scale_factor
 
         #select uncertain samples
-        var = (votes_1 * votes_2) / (((votes_1 + votes_2) ** 2) * (votes_1 + votes_2 + 1))
-        var[np.isnan(var)] = 1e6
-        var_flat = var.flatten()
+        var = (votes_1 * votes_2) / (((votes_1 + votes_2 + 1e-6) ** 2) * (votes_1 + votes_2 + 1))
+        mask = (votes_1 + votes_2) != 0
+        var_masked = var[mask]
+        var_flat = var_masked.flatten()
         count = int(len(var_flat) * cfg.training.online.reverse_ratio)
         threshold = np.partition(var_flat, -count)[-count]
-        indices = np.where(var_flat >= threshold)[0]
-        ratio_1, ratio_2 = votes_1 / (votes_1 + votes_2 + 1e-6), votes_2 / (votes_1 + votes_2 + 1e-6)
+        masked_indices = np.where(var_flat >= threshold)[0]
+        original_indices = np.where(mask.flatten())[0]
+        indices = original_indices[masked_indices]
+        ratio_1, ratio_2 = votes_1 / (votes_1 + votes_2), votes_2 / (votes_1 + votes_2)
 
         all_votes_1 = np.array([np.round(ratio_1 * (cfg.training.online.all_votes / cfg.training.online.num_groups)) for _ in range(cfg.training.online.num_groups)])
         all_votes_2 = np.array([np.round(ratio_2 * (cfg.training.online.all_votes / cfg.training.online.num_groups)) for _ in range(cfg.training.online.num_groups)])
@@ -181,12 +187,12 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
             pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
 
-            pref_dataset.set_beta_priori(data_size=150)
+            pref_dataset.set_beta_priori(data_size=100)
             pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=50, warm_up_epochs=5, batch_size=5, lr=2.0e-5)
             pref_dataset.update_beta_priori()
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
-        del dataset, dataset_1, dataset_2
+        del dataset
 
         self.model.set_normalizer(normalizer)
         if cfg.training.use_ema:
@@ -254,7 +260,6 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 print(f"Round {online_epoch_idx + 1} of {cfg.training.online.num_groups} for online training")
 
                 local_votes_1 = np.array(all_votes_1[online_epoch_idx].T, dtype=np.float32).reshape(-1, 1)
-                
                 local_votes_2 = np.array(all_votes_2[online_epoch_idx].T, dtype=np.float32).reshape(-1, 1)
 
                 pref_dataset.pref_replay_buffer.meta['votes'] = local_votes_1
@@ -293,9 +298,9 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
                             # compute loss
                             avg_traj_loss = 0.0
-                            if cfg.training.map.use_map:
-                                avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
-                                                                      model = self.model, ref_model = ref_policy.model)
+                            # if cfg.training.map.use_map:
+                            #     avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
+                            #                                           model = self.model, ref_model = ref_policy.model)
                             raw_loss = self.model.compute_loss(batch, ref_model=ref_policy.model, avg_traj_loss = avg_traj_loss)
                             loss = raw_loss / cfg.training.gradient_accumulate_every
                             loss.backward()
@@ -357,32 +362,38 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                             batch = dict_apply(train_sampling_batch, lambda x: x.to(device, non_blocking=True))
                             get_obs = batch["obs"]
                             gt_action = batch["action"]
-                            
+                            get_obs_2 = batch["obs_2"]
+                            get_action_2 = batch["action_2"]
                             
                             start_idx = np.random.randint(0, gt_action.shape[1] - self.model.horizon + 1)
                             end_idx = start_idx + self.model.horizon
+                            start_idx_2 = np.random.randint(0, get_action_2.shape[1] - self.model.horizon + 1)
+                            end_idx_2 = start_idx_2 + self.model.horizon
 
                             get_obs = get_obs[:, start_idx:end_idx, :]
+                            get_obs_2 = get_obs_2[:, start_idx_2:end_idx_2, :]
                             gt_action = gt_action[:, start_idx:end_idx, :]
+                            get_action_2 = get_action_2[:, start_idx_2:end_idx_2, :]
                             obs_dict = {'obs': get_obs}
+                            obs_dict_2 = {'obs': get_obs_2}
 
                             result = policy.predict_action(obs_dict)
+                            result_2 = policy.predict_action(obs_dict_2)
                             if cfg.pred_action_steps_only:
                                 pred_action = result['action']
+                                pred_action_2 = result_2['action']
                                 start = cfg.n_obs_steps - 1
                                 end = start + cfg.n_action_steps
                                 gt_action = gt_action[:,start:end]
+                                get_action_2 = get_action_2[:,start:end]
                             else:
                                 pred_action = result['action_pred']
+                                pred_action_2 = result_2['action_pred']
                             pred_action = pred_action.to(gt_action.device, non_blocking=True)
-                            mse = torch.nn.functional.mse_loss(pred_action, gt_action)
+                            pred_action_2 = pred_action_2.to(get_action_2.device, non_blocking=True)
+                            mse = (torch.nn.functional.mse_loss(pred_action, gt_action) + torch.nn.functional.mse_loss(pred_action_2, get_action_2))*0.5
                             step_log['train_action_error'] = mse.item()
-                            del batch
-                            del obs_dict
-                            del gt_action
-                            del result
-                            del pred_action
-                            del mse
+                            del batch, obs_dict, obs_dict_2, gt_action, get_action_2, result, result_2, pred_action, pred_action_2, mse
 
                     # checkpoint
                     if (self.epoch % cfg.training.checkpoint_every) == 0:

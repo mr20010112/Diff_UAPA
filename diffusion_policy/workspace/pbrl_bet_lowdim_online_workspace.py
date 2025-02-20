@@ -87,18 +87,23 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         dataset: BaseLowdimDataset
         dataset = hydra.utils.instantiate(cfg.task.origin_dataset)
         assert isinstance(dataset, BaseLowdimDataset)
-        # train_dataloader = DataLoader(dataset, **cfg.dataloader)
+        train_dataloader = DataLoader(dataset, **cfg.dataloader)
 
-        # # set normalizer
-        # normalizer = None
-        # if cfg.training.enable_normalizer:
-        #     normalizer = dataset.get_normalizer()
-        # else:
-        #     normalizer = LinearNormalizer()
-        #     normalizer['action'] = SingleFieldLinearNormalizer.create_identity()
-        #     normalizer['obs'] = SingleFieldLinearNormalizer.create_identity()
+        # set normalizer
+        normalizer = None
+        if cfg.training.enable_normalizer:
+            normalizer = dataset.get_normalizer()
+        else:
+            normalizer = LinearNormalizer()
+            normalizer['action'] = SingleFieldLinearNormalizer.create_identity()
+            normalizer['obs'] = SingleFieldLinearNormalizer.create_identity()
 
         # self.policy.set_normalizer(normalizer)
+
+        # # fit action_ae (K-Means)
+        # self.policy.fit_action_ae(
+        #         normalizer['action'].normalize(
+        #             dataset.get_all_actions()))
 
         # configure dataset
         dataset_1: BaseLowdimDataset
@@ -140,18 +145,21 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         votes_1_norm = (votes_1 - votes_min) / (votes_max - votes_min + 1e-8)
         votes_2_norm = (votes_2 - votes_min) / (votes_max - votes_min + 1e-8)
 
-        scale_factor = 5
+        scale_factor = 10
         votes_1 = votes_1_norm * scale_factor
         votes_2 = votes_2_norm * scale_factor
 
         #select uncertain samples
-        var = (votes_1 * votes_2) / (((votes_1 + votes_2) ** 2) * (votes_1 + votes_2 + 1))
-        var[np.isnan(var)] = 1e6
-        var_flat = var.flatten()
+        var = (votes_1 * votes_2) / (((votes_1 + votes_2 + 1e-6) ** 2) * (votes_1 + votes_2 + 1))
+        mask = (votes_1 + votes_2) != 0
+        var_masked = var[mask]
+        var_flat = var_masked.flatten()
         count = int(len(var_flat) * cfg.training.online.reverse_ratio)
         threshold = np.partition(var_flat, -count)[-count]
-        indices = np.where(var_flat >= threshold)[0]
-        ratio_1, ratio_2 = votes_1 / (votes_1 + votes_2 + 1e-6), votes_2 / (votes_1 + votes_2 + 1e-6)
+        masked_indices = np.where(var_flat >= threshold)[0]
+        original_indices = np.where(mask.flatten())[0]
+        indices = original_indices[masked_indices]
+        ratio_1, ratio_2 = votes_1 / (votes_1 + votes_2), votes_2 / (votes_1 + votes_2)
 
         all_votes_1 = np.array([np.round(ratio_1 * (cfg.training.online.all_votes / cfg.training.online.num_groups)) for _ in range(cfg.training.online.num_groups)])
         all_votes_2 = np.array([np.round(ratio_2 * (cfg.training.online.all_votes / cfg.training.online.num_groups)) for _ in range(cfg.training.online.num_groups)])
@@ -174,7 +182,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                 all_votes_2[local_epoch_idx] = np.maximum(all_votes_2[local_epoch_idx], 0)
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
-        del dataset, dataset_1, dataset_2
+        del dataset
 
         # configure lr scheduler
         lr_scheduler = get_scheduler(
@@ -327,32 +335,45 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                         # log all
                         step_log.update(runner_log)
 
-                    # run sample on a training batch
+                    # run diffusion sampling on a training batch
                     if (self.epoch % cfg.training.sample_every) == 0:
                         with torch.no_grad():
                             # sample trajectory from training set, and evaluate difference
-                            batch = train_sampling_batch
-                            obs_dict = {'obs': batch['obs']}
-                            gt_action = batch['action']
+                            batch = dict_apply(train_sampling_batch, lambda x: x.to(device, non_blocking=True))
+                            get_obs = batch["obs"]
+                            gt_action = batch["action"]
+                            get_obs_2 = batch["obs_2"]
+                            get_action_2 = batch["action_2"]
                             
+                            start_idx = np.random.randint(0, gt_action.shape[1] - self.policy.horizon + 1)
+                            end_idx = start_idx + self.policy.horizon
+                            start_idx_2 = np.random.randint(0, get_action_2.shape[1] - self.policy.horizon + 1)
+                            end_idx_2 = start_idx_2 + self.policy.horizon
+
+                            get_obs = get_obs[:, start_idx:end_idx, :]
+                            get_obs_2 = get_obs_2[:, start_idx_2:end_idx_2, :]
+                            gt_action = gt_action[:, start_idx:end_idx, :]
+                            get_action_2 = get_action_2[:, start_idx_2:end_idx_2, :]
+                            obs_dict = {'obs': get_obs}
+                            obs_dict_2 = {'obs': get_obs_2}
+
                             result = self.policy.predict_action(obs_dict)
+                            result_2 = self.policy.predict_action(obs_dict_2)
                             if cfg.pred_action_steps_only:
                                 pred_action = result['action']
+                                pred_action_2 = result_2['action']
                                 start = cfg.n_obs_steps - 1
                                 end = start + cfg.n_action_steps
                                 gt_action = gt_action[:,start:end]
+                                get_action_2 = get_action_2[:,start:end]
                             else:
                                 pred_action = result['action_pred']
-                            mse = torch.nn.functional.mse_loss(pred_action, gt_action[:, :pred_action.shape[1], ...])
-                            # log
-                            step_log['train_action_mse_error'] = mse.item()
-                            # release RAM
-                            del batch
-                            del obs_dict
-                            del gt_action
-                            del result
-                            del pred_action
-                            del mse
+                                pred_action_2 = result_2['action_pred']
+                            pred_action = pred_action.to(gt_action.device, non_blocking=True)
+                            pred_action_2 = pred_action_2.to(get_action_2.device, non_blocking=True)
+                            mse = (torch.nn.functional.mse_loss(pred_action, gt_action) + torch.nn.functional.mse_loss(pred_action_2, get_action_2))*0.5
+                            step_log['train_action_error'] = mse.item()
+                            del batch, obs_dict, obs_dict_2, gt_action, get_action_2, result, result_2, pred_action, pred_action_2, mse
 
                     # checkpoint
                     if (self.epoch % cfg.training.checkpoint_every) == 0:

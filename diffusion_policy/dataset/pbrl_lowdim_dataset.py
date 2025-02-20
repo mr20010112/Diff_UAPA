@@ -93,16 +93,6 @@ class Pbrl_Hdf5LowdimDataset(BaseLowdimDataset):
                 else:
                     votes = np.sum([(gamma ** t) * reward for t, reward in enumerate(episode_1['reward'])])
                     votes_2 = np.sum([(gamma ** t) * reward for t, reward in enumerate(episode_2['reward'])])
-                    # if np.abs(flag - flag_2) < 1e-6:
-                    #     votes = np.array([0.5])
-                    #     votes_2 = np.array([0.5])
-                    # elif flag > flag_2:
-                    #     votes = np.array([1.0])
-                    #     votes_2 = np.array([0.0])
-                    # else:
-                    #     votes = np.array([0.0])
-                    #     votes_2 = np.array([1.0])
-
 
                 # Add preference episode to the replay buffer
                 self.pref_replay_buffer.add_pref_episode(
@@ -211,6 +201,7 @@ class Pbrl_Hdf5LowdimDataset(BaseLowdimDataset):
     #     normalizer = LinearNormalizer()
     #     normalizer.fit(data=self.replay_buffer.data, last_n_dims=1, mode=mode, **kwargs)
     #     return normalizer
+    
     def construct_pref_data(self):
         data = self.pref_replay_buffer.data
         pref_data = data.copy()
@@ -221,6 +212,7 @@ class Pbrl_Hdf5LowdimDataset(BaseLowdimDataset):
 
         return pref_data
 
+    # 设置先验beta模型
     def set_beta_priori(self, data_size=100):
         pref_data = self.construct_pref_data()
         self.beta_model = BetaNetwork(data=pref_data,
@@ -301,7 +293,7 @@ class Pbrl_Hdf5LowdimDataset(BaseLowdimDataset):
         max_value = torch.max(torch.cat([alpha, beta, alpha_2, beta_2]))
         min_value = torch.min(torch.cat([alpha, beta, alpha_2, beta_2]))
 
-        target_min, target_max = 1, 6
+        target_min, target_max = 1, 8
 
         alpha = scale_tensor(alpha, min_value, max_value, target_min, target_max)
         beta = scale_tensor(beta, min_value, max_value, target_min, target_max)

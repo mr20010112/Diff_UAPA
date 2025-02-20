@@ -1,6 +1,7 @@
 {
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "Python 调试程序: 当前文件",
             "type": "python",
@@ -9,28 +10,11 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "--config-name=pbrl_diffusion_transformer_lowdim_can_online_workspace.yaml"
-            ]
+                "--config-name=pbrl_diffusion_transformer_lowdim_transport_online_workspace.yaml"
+            ],
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "3",
+            }
         }
     ]
 }
-
-// {
-//     "version": "0.2.0",
-//     "configurations": [
-//         {
-//             "name": "Python 调试程序: 当前文件",
-//             "type": "python",
-//             "request": "launch",
-//             "program": "${workspaceFolder}/ray_train_multirun.py",
-//             "console": "integratedTerminal",
-//             "justMyCode": false,
-//             "args": [
-//                 "--config-name=pbrl_diffusion_transformer_lowdim_kitchen_online_workspace.yaml",
-//                 "--seeds=42,1337",
-//                 "--monitor_key=test/mean_score",
-//                 "--ray_address=auto"
-//             ],
-//         }
-//     ]
-// }

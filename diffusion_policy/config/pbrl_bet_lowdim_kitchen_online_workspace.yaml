@@ -4,8 +4,7 @@ defaults:
 
 name: train_bet_lowdim
 _target_: diffusion_policy.workspace.pbrl_bet_lowdim_online_workspace.PbrlBETLowdimWorkspace
-checkpoint_dir: 'data/experiments/low_dim/kitchen/bet/base/epoch=0050-test_mean_score=0.486.ckpt'
-
+checkpoint_dir: 'data/experiments/low_dim/kitchen/bet/base_0.5/epoch=0050-test_mean_score=0.486.ckpt'
 
 obs_dim: ${task.obs_dim}
 action_dim: ${task.action_dim}
@@ -25,7 +24,7 @@ obs_as_global_cond: False
 pred_action_steps_only: False
 
 policy:
-  _target_: diffusion_policy.policy.dpo_bet_lowdim_policy.BETLowdimPolicy #cpl_bet_lowdim_policy, dpo_bet_lowdim_policy
+  _target_: diffusion_policy.policy.dpo_bet_lowdim_policy.BETLowdimPolicy #cpl_, dpo_
 
   action_ae:
     _target_: diffusion_policy.model.bet.action_ae.discretizers.k_means.KMeansDiscretizer
@@ -57,40 +56,40 @@ policy:
     action_dim: ${action_dim}
 
   gamma: ${gamma}
-  beta: 0.25 #cpl 0.5 #dpo 1
+  beta: 0.0625 #cpl 0.0625 #dpo 0.025
   horizon: ${horizon}
   n_obs_steps: ${n_obs_steps}
   n_action_steps: ${n_action_steps}
 
 dataloader:
-  batch_size: 40
+  batch_size: 80
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 40
+  batch_size: 80
   num_workers: 1
   shuffle: False
   pin_memory: True
   persistent_workers: False
 
 optimizer:
-  learning_rate: 5e-7 # 1e-4
-  weight_decay: 0.1
-  betas: [0.9, 0.99]
+  learning_rate: 1e-4 # 1e-4
+  weight_decay: 0.01
+  betas: [0.9, 0.95]
 
 training:
   device_cpu: "cpu"
   device_gpu: "cuda:0"
-  seed: 43
+  seed: 42
   debug: False
   resume: True
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 0
-  num_epochs: 15
+  num_epochs: 30
   gradient_accumulate_every: 1
   grad_norm_clip: 1.0
   enable_normalizer: True
@@ -111,7 +110,7 @@ training:
     num_groups: 4
     all_votes: 100
     reverse_ratio: 0.2
-    reverse_rate: 0.5
+    reverse_rate: 0.25 #0.25, 0.5, 0.75
     reverse_freq: 1
     update_history: False
   map:

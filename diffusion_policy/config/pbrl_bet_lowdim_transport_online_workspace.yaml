@@ -1,10 +1,10 @@
 defaults:
   - _self_
-  - task: can_lowdim
+  - task: transport_lowdim
 
 name: train_bet_lowdim
 _target_: diffusion_policy.workspace.pbrl_bet_lowdim_online_workspace.PbrlBETLowdimWorkspace
-checkpoint_dir: 'data/experiments/low_dim/robomimic/can/bet/base/epoch=0004-test_mean_score=0.560.ckpt'
+checkpoint_dir: 'data/experiments/low_dim/robomimic/transport/bet/base/epoch=0040-test_mean_score=0.420.ckpt'
 
 obs_dim: ${task.obs_dim}
 action_dim: ${task.action_dim}
@@ -56,30 +56,30 @@ policy:
     action_dim: ${action_dim}
 
   gamma: ${gamma}
-  beta: 0.125 #dpo:0.125; cpl:0.005
+  beta: 0.01 #cpl:1e-3; dpo:0.01
   bias_reg: 0.25
   horizon: ${horizon}
   n_obs_steps: ${n_obs_steps}
   n_action_steps: ${n_action_steps}
 
 dataloader:
-  batch_size: 100
+  batch_size: 60
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 100
+  batch_size: 60
   num_workers: 1
   shuffle: False
   pin_memory: True
   persistent_workers: False
 
 optimizer:
-  learning_rate: 1.0e-6 # 1e-4
-  weight_decay: 0.1
-  betas: [0.9, 0.99]
+  learning_rate: 0.0001 # 1e-4
+  weight_decay: 0.01
+  betas: [0.9, 0.95]
 
 
 training:
@@ -91,14 +91,14 @@ training:
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 0
-  num_epochs: 15
+  num_epochs: 75
   gradient_accumulate_every: 1
   grad_norm_clip: 1.0
   enable_normalizer: True
   # training loop control
   # in epochs
-  rollout_every: 10
-  checkpoint_every: 10
+  rollout_every: 25
+  checkpoint_every: 25
   val_every: 1
   sample_every: 5
   # steps per epoch
@@ -106,8 +106,8 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
-  dataset_1_dir: 'data/robomimic/datasets/can/normal/can_lowdim_data_0.5_3.h5'
-  dataset_2_dir: 'data/robomimic/datasets/can/normal/can_lowdim_data_0.5_4.h5'
+  # dataset_1_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.4.h5'
+  # dataset_2_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.7.h5'
   online:
     num_groups: 4
     all_votes: 100

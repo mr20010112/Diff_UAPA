@@ -50,7 +50,9 @@ class RobomimicReplayLowdimDataset(BaseLowdimDataset):
                     raw_actions=demo['actions'][:].astype(np.float32),
                     obs_keys=obs_keys,
                     abs_action=abs_action,
-                    rotation_transformer=rotation_transformer)
+                    rotation_transformer=rotation_transformer,
+                    raw_rewards=demo['rewards'][:],
+                )
                 replay_buffer.add_episode(episode)
 
         val_mask = get_val_mask(
@@ -138,7 +140,7 @@ def normalizer_from_stat(stat):
         input_stats_dict=stat
     )
     
-def _data_to_obs(raw_obs, raw_actions, obs_keys, abs_action, rotation_transformer):
+def _data_to_obs(raw_obs, raw_actions, obs_keys, abs_action, rotation_transformer, raw_rewards):
     obs = np.concatenate([
         raw_obs[key] for key in obs_keys
     ], axis=-1).astype(np.float32)
@@ -163,6 +165,7 @@ def _data_to_obs(raw_obs, raw_actions, obs_keys, abs_action, rotation_transforme
     
     data = {
         'obs': obs,
-        'action': raw_actions
+        'action': raw_actions,
+        'reward': raw_rewards.astype(np.float32),
     }
     return data

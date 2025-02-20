@@ -12,6 +12,10 @@ def compute_all_traj_loss(replay_buffer=None, model=None, ref_model=None):
         observations_2 = np.array(data['obs_2'], dtype=np.float32)
         actions_2 = np.array(data['action_2'], dtype=np.float32)
 
+        ref_model.eval()
+        for param in ref_model.parameters():
+            param.requires_grad = False
+
         ref_model = ref_model.to(model.device)
 
         # Normalize data

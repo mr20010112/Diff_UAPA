@@ -1,11 +1,24 @@
-import matplotlib.pyplot as plt
-import scipy.stats as stats
-import pylab
-from pylab import *
- 
-mu, sigma = 5, 0.7
-lower, upper = mu - 2 * sigma, mu + 2 * sigma  # 截断在[μ-2σ, μ+2σ]
-X = stats.truncnorm(-3, 3, loc=0.25, scale=0.25/3)
-s = X.rvs(10000)
-print(s.mean())
-plt.hist(s, bins=30, density=True, alpha=0.6, color='g')
+import h5py
+
+# 指定 HDF5 文件路径
+file_path = "data/robomimic/datasets/transport/ph/low_dim_abs.hdf5"
+
+# 打开 HDF5 文件
+with h5py.File(file_path, "r") as h5_file:
+    print(f"Exploring HDF5 file: {file_path}")
+    
+    # 遍历文件结构
+    for name, obj in h5_file.items():
+        if isinstance(obj, h5py.Group):
+            print(f"Group: {name}")
+        elif isinstance(obj, h5py.Dataset):
+            print(f"  Dataset: {name} | Shape: {obj.shape} | Type: {obj.dtype}")
+    
+    # 如果需要深入递归访问
+    def print_structure(name, obj):
+        if isinstance(obj, h5py.Group):
+            print(f"Group: {name}")
+        elif isinstance(obj, h5py.Dataset):
+            print(f"  Dataset: {name} | Shape: {obj.shape} | Type: {obj.dtype}")
+
+    h5_file.visititems(print_structure)

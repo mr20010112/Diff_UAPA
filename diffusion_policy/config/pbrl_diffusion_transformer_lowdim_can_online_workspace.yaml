@@ -1,9 +1,9 @@
 defaults:
   - _self_
-  - task: can_lowdim_abs 
+  - task: can_lowdim_abs #kitchen_lowdim_abs
 
 name: train_diffusion_transformer_lowdim
-_target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type1_workspace.PbrlDiffusionTransformerLowdimWorkspace
+_target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type2_workspace.PbrlDiffusionTransformerLowdimWorkspace #_type1_, _type2_
 checkpoint_dir: 'data/experiments/low_dim/robomimic/can/diff/base/epoch=0070-test_mean_score=0.600.ckpt'
 
 obs_dim: ${task.obs_dim}
@@ -22,7 +22,7 @@ obs_as_cond: True
 pred_action_steps_only: False
 
 policy: 
-  _target_: diffusion_policy.policy.cpl_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy
+  _target_: diffusion_policy.policy.ours_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_
 
   model: 
     _target_: diffusion_policy.model.diffusion.transformer_for_diffusion.TransformerForDiffusion
@@ -54,7 +54,7 @@ policy:
     prediction_type: epsilon # or sample
 
   gamma: ${gamma}
-  beta: 4.0e-5 #dpo:2.0e-5; cpl:4.0e-6
+  beta: 5.0e-5 #dpo:0.0005; cpl:0.00003125; ours:5.0e-5
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
   bias_reg: 0.25
@@ -74,28 +74,28 @@ policy:
 ema:
   _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
   update_after_step: 0
-  inv_gamma: 1.0
-  power: 0.75
+  inv_gamma: 2.0 #1.0
+  power: 0.9 #0.75
   min_value: 0.0
   max_value: 0.9999
 
 dataloader:
-  batch_size: 50
+  batch_size: 65
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 50
+  batch_size: 65
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 optimizer:
-  learning_rate: 1.0e-5
-  weight_decay: 5.0e-4
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-3
   betas: [0.9, 0.95]
 
 training:
@@ -108,15 +108,16 @@ training:
   lr_scheduler: cosine
   # Transformer needs LR warmup
   lr_warmup_steps: 0
-  num_epochs: 15
+  num_epochs: 75
   # lr_end: 1.0e-8
   # power: 1.5
+  grad_norm_clip: 0.5
   gradient_accumulate_every: 1
   use_ema: True
   # training loop control
   # in epochs
-  rollout_every: 10
-  checkpoint_every: 10
+  rollout_every: 25
+  checkpoint_every: 25
   val_every: 1
   sample_every: 5
   # steps per epoch
@@ -124,8 +125,8 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
-  dataset_1_dir: 'data/robomimic/datasets/can/normal/can_lowdimabs_data_0.5_5.h5'
-  dataset_2_dir: 'data/robomimic/datasets/can/normal/can_lowdimabs_data_0.5_6.h5'
+  dataset_1_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.5.h5'
+  dataset_2_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.5_2.h5'
   online:
     num_groups: 4
     all_votes: 100
@@ -134,8 +135,8 @@ training:
     reverse_freq: 1
     update_history: False
   map:
-    use_map: False # only true when use our method
-    map_ratio: 0.2
+    use_map: False #True
+    map_ratio: 0.25
 
 
 logging:

@@ -66,9 +66,8 @@ dataset_2:
 
 pref_dataset:
   _target_: diffusion_policy.dataset.pbrl_lowdim_dataset.Pbrl_Hdf5LowdimDataset
-  sequence_length: ${task.env_runner.max_steps}
+  sequence_length: 60 #${task.env_runner.max_steps}
   val_ratio: 0
   N: 500
   gamma: ${gamma}
   gpu_device: ${training.device_gpu}
-  # save_dir: data/pref_data/robomimic/lift

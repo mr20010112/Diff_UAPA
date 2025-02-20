@@ -28,39 +28,21 @@ class Hdf5LowdimDataset(BaseLowdimDataset):
         if not abs_action:
             raise NotImplementedError()
 
-        # #包含机器人状态维度上噪声振幅的数组
-        # robot_pos_noise_amp = np.array([0.1   , 0.1   , 0.1   , 0.1   , 0.1   , 0.1   , 0.1   , 0.1   ,
-        #     0.1   , 0.005 , 0.005 , 0.0005, 0.0005, 0.0005, 0.0005, 0.0005,
-        #     0.0005, 0.005 , 0.005 , 0.005 , 0.1   , 0.1   , 0.1   , 0.005 ,
-        #     0.005 , 0.005 , 0.1   , 0.1   , 0.1   , 0.005 ], dtype=np.float32)
-        # rng = np.random.default_rng(seed=seed)
-
         with h5py.File(dataset_dir, 'r') as f:
             actions = f['actions'][:]
             observations = f['observations'][:]
             rewards = f['rewards'][:]
             terminals = f['terminals'][:]
-            # timeouts = f['timeouts'][:]
 
-        # actions = actions * (np.ones([len(actions), 9]) * 2) + np.zeros([len(actions), 9])
-        # actions = actions * 0.08 + observations[:, :9]
-        # observations[:, 30:] = np.zeros([len(observations), 30]) 
-
-
-        # if robot_noise_ratio > 0:
-        #     # add observation noise to match real robot
-        #     noise = robot_noise_ratio * robot_pos_noise_amp * rng.uniform(
-        #         low=-1., high=1., size=(observations.shape[0], 30))
-        #     observations[:,:30] += noise
 
         episode_ends = np.array((terminals == True).nonzero()[0])
         self.replay_buffer = ReplayBuffer.create_empty_numpy()
         for i in range(len(episode_ends)):
-            end = episode_ends[i]
+            end = episode_ends[i]+1
             if i == 0:
                 start = 0
             else:
-                start = episode_ends[i-1]  
+                start = episode_ends[i-1]+1
             try:
                 episode = {
                     'obs': observations[start:end],

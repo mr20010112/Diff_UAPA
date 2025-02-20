@@ -1,0 +1,93 @@
+Sun Jan 26 19:00:26 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 19:00:58 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 21:37:40 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 21:37:40 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 21:37:40 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 21:41:07 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 21:41:07 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 21:41:07 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 21:44:36 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 21:44:36 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 21:49:11 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 21:49:11 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 21:49:11 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 22:01:02 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 22:01:02 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 22:01:02 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 22:04:46 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 22:37:39 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 22:53:24 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 22:53:24 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 22:53:24 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 22:53:24 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 22:53:24 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 23:03:52 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 23:03:52 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 23:03:52 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 23:08:30 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 23:08:30 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 23:08:30 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 23:35:44 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+
+Sun Jan 26 23:35:44 2025
+ERROR: Offscreen framebuffer is not complete, error 0x8cdd
+

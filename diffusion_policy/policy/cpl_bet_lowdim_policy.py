@@ -179,12 +179,14 @@ class BETLowdimPolicy(BaseLowdimPolicy):
 
         To = self.n_obs_steps
 
-        observations_1 = batch["obs"].to(self.device).detach()
-        actions_1 = batch["action"].to(self.device).detach()
-        votes_1 = batch["votes"].to(self.device).detach()
-        observations_2 = batch["obs_2"].to(self.device).detach()
-        actions_2 = batch["action_2"].to(self.device).detach()
-        votes_2 = batch["votes_2"].to(self.device).detach()
+        observations_1 = batch["obs"].to(self.device)
+        actions_1 = batch["action"].to(self.device)
+        votes_1 = batch["votes"].to(self.device)
+        length_1 = batch["length"].to(self.device).detach()
+        observations_2 = batch["obs_2"].to(self.device)
+        actions_2 = batch["action_2"].to(self.device)
+        votes_2 = batch["votes_2"].to(self.device)
+        length_2 = batch["length_2"].to(self.device).detach()
 
 
         threshold = 1e-2
@@ -208,13 +210,13 @@ class BETLowdimPolicy(BaseLowdimPolicy):
         votes_2 = torch.squeeze(votes_2, dim=-1).detach()
 
         batch_1 = {
-            'obs': torch.tensor(observations_1, device=self.device).detach(),
-            'action': torch.tensor(actions_1, device=self.device).detach(),
+            'obs': torch.tensor(observations_1, device=self.device),
+            'action': torch.tensor(actions_1, device=self.device),
         }
 
         batch_2 = {
-            'obs': torch.tensor(observations_2, device=self.device).detach(),
-            'action': torch.tensor(actions_2, device=self.device).detach(),
+            'obs': torch.tensor(observations_2, device=self.device),
+            'action': torch.tensor(actions_2, device=self.device),
         }
 
         nbatch_1 = self.normalizer.normalize(batch_1)
@@ -225,10 +227,12 @@ class BETLowdimPolicy(BaseLowdimPolicy):
         obs_2 = nbatch_2['obs']
         action_2 = nbatch_2['action']
 
-        obs_1 = slice_episode(obs_1, horizon=self.horizon, stride=self.horizon)
-        action_1 = slice_episode(action_1, horizon=self.horizon, stride=self.horizon)
-        obs_2 = slice_episode(obs_2, horizon=self.horizon, stride=self.horizon)
-        action_2 = slice_episode(action_2, horizon=self.horizon, stride=self.horizon)
+        stride = self.n_obs_steps
+
+        obs_1 = slice_episode(obs_1, horizon=self.horizon, stride=stride)
+        action_1 = slice_episode(action_1, horizon=self.horizon, stride=stride)
+        obs_2 = slice_episode(obs_2, horizon=self.horizon, stride=stride)
+        action_2 = slice_episode(action_2, horizon=self.horizon, stride=stride)
 
 
         loss = 0
@@ -248,14 +252,11 @@ class BETLowdimPolicy(BaseLowdimPolicy):
                 target_latents=latent_1,
             )
 
-            # _, loss_1 = self.state_prior.get_latent_and_loss(
-            #     obs_rep=enc_obs_1.clone(),
-            #     target_latents=latent_1,
-            # )
+            mask_1 = (self.horizon + (i-1)*stride) <= length_1
+            mask_1 = mask_1.int()
 
-            #traj_loss_1 += -torch.norm(action_1_slide-pred_action_1['action'], dim=-1)*(self.gamma ** (i*self.n_action_steps + torch.arange(0, self.n_action_steps, device=self.device))).reshape(1,-1)
-            traj_loss_1 = traj_loss_1 - ((loss_1)*torch.tensor(self.gamma**(i*self.horizon), device=self.device))
-            immatation_loss_1 = immatation_loss_1 + loss_1
+            traj_loss_1 = traj_loss_1 - ((loss_1*mask_1)*torch.tensor(self.gamma**(i*self.horizon), device=self.device))
+            immatation_loss_1 = immatation_loss_1 + loss_1*mask_1
             
         for i in range(len(obs_2)):
             obs_2_slide = obs_2[i]
@@ -270,23 +271,21 @@ class BETLowdimPolicy(BaseLowdimPolicy):
                 target_latents=latent_2,
             )
 
-            # _, loss_2 = self.state_prior.get_latent_and_loss(
-            #     obs_rep=enc_obs_2.clone(),
-            #     target_latents=latent_2,
-            # )
+            mask_2 = (self.horizon + (i-1)*stride) <= length_2
+            mask_2 = mask_2.int()
 
-            #traj_loss_2 += -torch.norm(action_2_slide-pred_action_2['action'], dim=-1)*(self.gamma ** (i*self.n_action_steps + torch.arange(0, self.n_action_steps, device=self.device))).reshape(1,-1)
-            traj_loss_2 = traj_loss_2 - ((loss_2)*torch.tensor(self.gamma**(i*self.horizon), device=self.device))
-            immatation_loss_2 = immatation_loss_2 + loss_2
+            traj_loss_2 = traj_loss_2 - ((loss_2*mask_2)*torch.tensor(self.gamma**(i*self.horizon), device=self.device))
+            immatation_loss_2 = immatation_loss_2 + loss_2*mask_2
 
         # traj_loss_1 = torch.sum(traj_loss_1, dim=-1)
         # traj_loss_2 = torch.sum(traj_loss_2, dim=-1)
         mean_loss_1 = torch.mean(torch.abs(traj_loss_1 - self.bias_reg *  traj_loss_2))
         mean_loss_2 = torch.mean(torch.abs(traj_loss_2 - self.bias_reg *  traj_loss_1))
+        immatation_loss = immatation_loss_1 + immatation_loss_2
 
-        mle_loss_1 = -F.logsigmoid(self.beta*(traj_loss_1 - self.bias_reg * traj_loss_2)) + immatation_loss_1/(self.horizon*len(obs_1)) + immatation_loss_2/(self.horizon*len(obs_2))
-        mle_loss_2 = -F.logsigmoid(self.beta*(traj_loss_2 - self.bias_reg * traj_loss_1)) + immatation_loss_1/(self.horizon*len(obs_1)) + immatation_loss_2/(self.horizon*len(obs_2))
+        mle_loss_1 = -F.logsigmoid(self.beta*(traj_loss_1 - self.bias_reg * traj_loss_2)) + immatation_loss/((len(obs_1) + len(obs_2))*self.horizon)
+        mle_loss_2 = -F.logsigmoid(self.beta*(traj_loss_2 - self.bias_reg * traj_loss_1)) + immatation_loss/((len(obs_1) + len(obs_2))*self.horizon)
 
-        loss += (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2) #(votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2)
+        loss += (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2)
 
         return torch.mean(loss)
