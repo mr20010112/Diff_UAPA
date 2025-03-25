@@ -22,7 +22,7 @@ obs_as_cond: True
 pred_action_steps_only: False
 
 policy: 
-  _target_: diffusion_policy.policy.dpo_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_
+  _target_: diffusion_policy.policy.ours_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_
 
   model: 
     _target_: diffusion_policy.model.diffusion.transformer_for_diffusion.TransformerForDiffusion
@@ -54,7 +54,7 @@ policy:
     prediction_type: epsilon # or sample
 
   gamma: ${gamma}
-  beta: 1.785e-06 #cpl:1.785e-06 ;dpo:1.785e-06 ours:3.57e-05
+  beta: 7.14e-05 #cpl:1.785e-06 ;dpo:1.785e-06 ours:3.57e-05
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
   bias_reg: 0.25
@@ -80,22 +80,22 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 15
+  batch_size: 19
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 15
+  batch_size: 19
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 optimizer:
-  learning_rate: 1.0e-4
-  weight_decay: 1.0e-4
+  learning_rate: 2.5e-5
+  weight_decay: 1.0e-3
   betas: [0.9, 0.95]
 
 training:
@@ -108,15 +108,15 @@ training:
   lr_scheduler: cosine
   # Transformer needs LR warmup
   lr_warmup_steps: 0
-  num_epochs: 50
+  num_epochs: 100
   # lr_end: 1.0e-8
   # power: 1.5
   gradient_accumulate_every: 1
   use_ema: True
   # training loop control
   # in epochs
-  rollout_every: 10
-  checkpoint_every: 10
+  rollout_every: 25
+  checkpoint_every: 25
   val_every: 1
   sample_every: 5
   # steps per epoch
@@ -130,7 +130,7 @@ training:
     num_groups: 4
     all_votes: 100
     reverse_ratio: 0.2
-    reverse_rate: 0.25 #0.25, 0.5, 0.75
+    reverse_rate: 0.5 #0.25, 0.5, 0.75
     reverse_freq: 1
     update_history: False
   map:

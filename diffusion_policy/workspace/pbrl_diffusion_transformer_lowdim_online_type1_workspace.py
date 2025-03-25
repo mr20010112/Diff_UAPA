@@ -87,7 +87,7 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         device = torch.device(cfg.training.device_gpu)
         ref_policy = copy.deepcopy(self.model)
         # ref_model.double()
-        ref_policy.eval() 
+        ref_policy.train() #.eval() 
         for param in ref_policy.parameters():
             param.requires_grad = False
         ref_policy.to(device)
@@ -101,21 +101,21 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         assert isinstance(dataset, BaseLowdimDataset)
         normalizer = dataset.get_normalizer()
 
-        # # configure dataset
-        # dataset_1: BaseLowdimDataset
-        # dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
-        # #device = torch.device(cfg.training.device_cpu)
-        # assert isinstance(dataset_1, BaseLowdimDataset)
+        # configure dataset
+        dataset_1: BaseLowdimDataset
+        dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
+        #device = torch.device(cfg.training.device_cpu)
+        assert isinstance(dataset_1, BaseLowdimDataset)
 
-        # # configure dataset
-        # dataset_2: BaseLowdimDataset
-        # dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
-        # # expert_normalizer = normal_dataset.get_normalizer()
-        # assert isinstance(dataset_2, BaseLowdimDataset)
+        # configure dataset
+        dataset_2: BaseLowdimDataset
+        dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
+        # expert_normalizer = normal_dataset.get_normalizer()
+        assert isinstance(dataset_2, BaseLowdimDataset)
 
         pref_dataset: BaseLowdimDataset
-        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset.replay_buffer, \
-                                               replay_buffer_2=dataset.replay_buffer) #cfg.task.perf_dataset
+        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset_1.replay_buffer, \
+                                               replay_buffer_2=dataset_2.replay_buffer) #cfg.task.perf_dataset
 
         # cut online groups
         votes_1, votes_2 = pref_dataset.pref_replay_buffer.meta['votes'], pref_dataset.pref_replay_buffer.meta['votes_2']

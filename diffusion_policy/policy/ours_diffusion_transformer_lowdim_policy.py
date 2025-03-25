@@ -221,6 +221,12 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         votes_2 = torch.where(condition_2, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device))
         votes_2 = torch.squeeze(votes_2, dim=-1).detach()
 
+        mask = condition_2.squeeze(-1)
+
+        actions_1[mask], actions_2[mask] = actions_2[mask], actions_1[mask]
+        observations_1[mask], observations_2[mask] = observations_2[mask], observations_1[mask]
+        length_1[mask], length_2[mask] = length_2[mask], length_1[mask]
+
         batch_1 = {
             'obs': torch.tensor(observations_1, device=self.device),
             'action': torch.tensor(actions_1, device=self.device),
@@ -351,11 +357,11 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             diff_map_loss_1 = torch.mean(torch.abs(traj_loss_1 - avg_traj_loss))
             diff_map_loss_2 = torch.mean(torch.abs(traj_loss_2 - avg_traj_loss))
 
-            mle_loss_1 = -F.logsigmoid((traj_loss_1 - self.bias_reg*traj_loss_2)) + immitation_loss*(1+2*self.map_ratio)*10
-            mle_loss_2 = -F.logsigmoid((traj_loss_2 - self.bias_reg*traj_loss_1)) + immitation_loss*(1+2*self.map_ratio)*10
+            mle_loss_1 = -F.logsigmoid((traj_loss_1 - self.bias_reg*traj_loss_2)) + immitation_loss*(1+2*self.map_ratio)*5
+            mle_loss_2 = -F.logsigmoid((traj_loss_2 - self.bias_reg*traj_loss_1)) + immitation_loss*(1+2*self.map_ratio)*5
 
 
-            loss += (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2) / (2 * self.train_time_samples[0]) 
+            loss += mle_loss_1 / (2 * self.train_time_samples[0]) 
             
             if self.use_map:
 
