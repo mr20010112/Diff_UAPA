@@ -103,20 +103,20 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         assert isinstance(dataset, BaseLowdimDataset)
         normalizer = dataset.get_normalizer()
 
-        # configure dataset
-        dataset_1: BaseLowdimDataset
-        dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
-        assert isinstance(dataset_1, BaseLowdimDataset)
+        # # configure dataset
+        # dataset_1: BaseLowdimDataset
+        # dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
+        # assert isinstance(dataset_1, BaseLowdimDataset)
 
 
-        # configure dataset
-        dataset_2: BaseLowdimDataset
-        dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
-        assert isinstance(dataset_2, BaseLowdimDataset)
+        # # configure dataset
+        # dataset_2: BaseLowdimDataset
+        # dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
+        # assert isinstance(dataset_2, BaseLowdimDataset)
 
         pref_dataset: BaseLowdimDataset
-        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset_1.replay_buffer, \
-                                               replay_buffer_2=dataset_1.replay_buffer)  #cfg.task.perf_dataset
+        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset.replay_buffer, \
+                                               replay_buffer_2=dataset.replay_buffer)  #cfg.task.perf_dataset
 
 
         # cut online groups
@@ -268,7 +268,7 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                                                       batch_size=5, 
                                                       lr=2.0e-5 if online_epoch_idx == 0 else 1.0e-6,
                                                       )
-                pref_dataset.update_beta_priori()
+                pref_dataset.update_beta_priori(batch_size=1)
 
                 self.model.map_ratio = (online_epoch_idx + 1) * cfg.training.map.map_ratio / (cfg.training.online.num_groups)
 
@@ -313,7 +313,11 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
                             # compute loss
                             avg_traj_loss = 0.0
-                            raw_loss = self.model.compute_loss(batch, ref_model=ref_policy.model, avg_traj_loss = avg_traj_loss)
+                            stride = 2*self.model.n_obs_steps
+                            if cfg.training.map.use_map:
+                                avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
+                                                                      model = self.model, ref_model = ref_policy.model, stride=stride)
+                            raw_loss = self.model.compute_loss(batch, ref_model=ref_policy.model, avg_traj_loss = avg_traj_loss, stride=stride)
                             loss = raw_loss / cfg.training.gradient_accumulate_every
                             loss.backward()
 

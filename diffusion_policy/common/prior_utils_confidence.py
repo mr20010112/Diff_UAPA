@@ -12,6 +12,9 @@ import torch.nn.functional as F
 from pathlib import Path
 import copy
 from torch.optim.lr_scheduler import SequentialLR, LinearLR, CosineAnnealingLR
+from diffusion_policy.policy.diffusion_transformer_hybrid_image_policy import DiffusionTransformerHybridImagePolicy
+from diffusion_policy.common.pytorch_util import dict_apply
+
 
 Batch = collections.namedtuple(
     'Batch',
@@ -402,6 +405,220 @@ class BetaNetwork(nn.Module):
         else:
             self.load_model(load_dir)
             self.ref_model = copy.deepcopy(self.model)
+
+    def online_update(self, dataset, num_epochs=1, warm_up_epochs=0, batch_size=1, lr = 1.0e-6):
+        interval = math.ceil(dataset["obs"].shape[0] / batch_size)
+        total_steps = num_epochs * interval
+        warm_up_steps = warm_up_epochs * interval
+        main_steps = total_steps - warm_up_steps
+
+        # Learning rate schedulers
+        self.lr = lr
+        self.opt = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
+        warm_up_scheduler = LinearLR(self.opt, start_factor=1e-8, end_factor=1.0, total_iters=warm_up_steps)
+        cosine_scheduler = CosineAnnealingLR(self.opt, T_max=main_steps)
+        self.scheduler = SequentialLR(self.opt, schedulers=[warm_up_scheduler, cosine_scheduler], milestones=[warm_up_steps])
+
+        for epoch in range(num_epochs):
+            beta_loss_all = []
+
+            batch_shuffled_idx = np.random.permutation(dataset["obs"].shape[0])
+            for i in tqdm(range(interval)):
+
+                start_pt = i * batch_size
+                end_pt = min((i + 1) * batch_size, dataset["obs"].shape[0])
+                batch = index_batch(dataset, batch_shuffled_idx[start_pt:end_pt])
+
+                obs_1 = batch['obs']  # batch_size * traj_len * obs_dim
+                act_1 = batch['action']  # batch_size * traj_len * action_dim
+                obs_2 = batch['obs_2']
+                act_2 = batch['action_2']
+                s_a_1 = np.concatenate([obs_1, act_1], axis=-1)
+                s_a_2 = np.concatenate([obs_2, act_2], axis=-1)
+
+                votes_1 = torch.from_numpy(batch['votes']).to(self.device)
+                votes_2 = torch.from_numpy(batch['votes_2']).to(self.device)
+
+                # threshold = 1e-3
+                # diff = torch.abs(votes_1 - votes_2)
+                # condition_1 = (votes_1 > votes_2) & (diff >= threshold)  # votes_1 > votes_2 and diff >= threshold
+                # condition_2 = (votes_1 < votes_2) & (diff >= threshold)  # votes_1 < votes_2 and diff >= threshold
+
+                # comp_1 = torch.where(condition_1, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device))
+                # comp_1 = torch.squeeze(comp_1, dim=-1)
+                # comp_2 = torch.where(condition_2, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device))
+                # comp_2 = torch.squeeze(comp_2, dim=-1)
+
+                comp_1 = torch.sigmoid(votes_1 - votes_2)
+                comp_2 = torch.sigmoid(votes_2 - votes_1)
+
+                pred_comp_1 = self.model.one_to_one_forward(torch.from_numpy(s_a_1).float().to(self.device), torch.from_numpy(s_a_2).float().to(self.device))
+                pred_comp_2 = self.model.one_to_one_forward(torch.from_numpy(s_a_2).float().to(self.device), torch.from_numpy(s_a_1).float().to(self.device))
+                # ref_comp_1 = self.ref_model.one_to_one_forward(torch.from_numpy(s_a_1).float().to(self.device), torch.from_numpy(s_a_2).float().to(self.device)).detach()
+                # ref_comp_2 = self.ref_model.one_to_one_forward(torch.from_numpy(s_a_2).float().to(self.device), torch.from_numpy(s_a_1).float().to(self.device)).detach()
+
+                beta_loss = (torch.mean((comp_1 - pred_comp_1) ** 2) + torch.mean((comp_2 - pred_comp_2) ** 2)) / 2
+
+                beta_loss_all.append(beta_loss)
+
+                self.opt.zero_grad()
+                beta_loss.backward()
+                self.opt.step()
+                self.scheduler.step()  # Update LR after each optimizer step
+
+            beta_loss_all = torch.stack(beta_loss_all, dim=0)
+            print("iteration:", epoch + 1)
+            print("mean_beta_loss_all:", torch.mean(beta_loss_all).item())
+
+    def save_model(self, filepath):
+        torch.save(self.state_dict(), filepath)
+
+    def load_model(self, filepath):
+        self.load_state_dict(torch.load(filepath, map_location=self.device))
+
+
+class BetaImageNetwork(nn.Module):
+    def __init__(self, data, policy: DiffusionTransformerHybridImagePolicy, device=torch.device('cuda'), data_size = 500, ):
+        super(BetaNetwork, self).__init__()
+
+        act_data = np.concatenate((data['action'], data['action_2']), axis=0)
+        votes_data = np.concatenate((data['votes'], data['votes_2']), axis=0)
+        obs_data = {key:np.concatenate((data['obs'][key], data['obs_2'][key]), axis=0) for key in data['obs']}
+        if data_size <= act_data.shape[0]:
+            indices = np.random.randint(0, act_data.shape[0], size=data_size)
+            obs_data = {key:obs_data[key][indices, ...]for key in obs_data.keys()}
+            act_data = act_data[indices, ...]
+            votes_data = votes_data[indices, ...]
+
+        act_data = torch.from_numpy(act_data).float().to(device)
+        obs_data = {key: torch.from_numpy(obs_data[key]).float().to(device) for key in obs_data.keys()}
+
+        obs_encoder = policy.nets['policy'].nets['encoder'].nets['obs']
+
+        obs_data = policy.normalizer.normalize(obs_data)
+        act_data = policy.normalizer.normalize(act_data)
+
+        this_nobs = dict_apply(obs_data, 
+                    lambda x: x.reshape(-1,*x.shape[2:]))
+        nobs_features = obs_encoder(this_nobs)
+        nobs_features = nobs_features.reshape(data_size, act_data.shape[1], -1)
+        nobs_features.detach()
+
+
+        self.votes_data = torch.from_numpy(votes_data).to(device)
+        self.lr = None
+        self.device = device
+        self.data = torch.concat((act_data, nobs_features), dim=-1)
+
+        class BetaModel(nn.Module):
+            def __init__(self, obs_data, act_data, device=torch.device('cuda')):
+                super(BetaModel, self).__init__()
+
+                self.enc_model = TransformerEncModel(
+                    data_dim = act_data.shape[-1] + obs_data.shape[-1],
+                    embedding_dim = 256,
+                    nhead = 4,
+                    num_encoder_layers = 2,
+                    device = device
+                ).to(device)
+
+                self.comp_model = AttentionComparisonModel(
+                    input_dim = 256, 
+                    dropout_rate = 0.3,
+                    nhead = 16,
+                    device = device
+                ).to(device)
+
+                self.data = torch.concat((obs_data, act_data), dim=-1)
+
+            def forward(self, x):
+                batch_f = self.enc_model(x)
+                all_data_f = self.enc_model(self.data)
+                bias = all_data_f.mean()
+                std = all_data_f.std()
+                all_data_f = (all_data_f - bias) / std
+                batch_f = (batch_f - bias) / std
+                output = self.comp_model(batch_f, all_data_f)
+                return output
+            
+            def one_to_one_forward(self, x, y):
+                x_f = self.enc_model(x)
+                y_f = self.enc_model(y)
+                all_data_f = self.enc_model(self.data)
+                bias = all_data_f.mean()
+                std = all_data_f.std()
+                x_f = (x_f - bias) / std
+                y_f = (y_f - bias) / std
+                output = self.comp_model.one_to_one_forward(x_f, y_f)
+                return output
+
+       
+
+        self.model = BetaModel(nobs_features, act_data, device)
+        self.opt = None #, weight_decay=1.0e-4
+        self.scheduler = None #torch.optim.lr_scheduler.ReduceLROnPlateau(self.opt, mode='min', patience=100, verbose=True)
+        self.ref_model: BetaModel
+
+    def get_alpha_beta(self, x):
+        batch_comp = self.model(x).detach()
+        alpha = torch.sum(batch_comp, dim=-1)
+        beta = torch.sum(1 - batch_comp, dim=-1)
+        # alpha = torch.sum(torch.where(batch_comp > 0.5, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device)), dim=-1)
+        # beta = torch.sum(torch.where(batch_comp < 0.5, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device)), dim=-1)
+
+        return alpha.detach(), beta.detach()
+
+    # def fit_data(self, save_dir=None, load_dir=None, num_epochs=1, warm_up_epochs=0, batch_size=1, lr=1.0e-5):
+    #     if load_dir is None:
+    #         interval = math.ceil(self.data.shape[0] / batch_size)
+    #         total_steps = num_epochs * interval
+    #         warm_up_steps = warm_up_epochs * interval
+    #         main_steps = total_steps - warm_up_steps
+
+    #         # Learning rate schedulers
+    #         self.lr = lr
+    #         self.opt = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
+    #         warm_up_scheduler = LinearLR(self.opt, start_factor=1e-8, end_factor=1.0, total_iters=warm_up_steps)
+    #         cosine_scheduler = CosineAnnealingLR(self.opt, T_max=main_steps)
+    #         self.scheduler = SequentialLR(self.opt, schedulers=[warm_up_scheduler, cosine_scheduler], milestones=[warm_up_steps])
+
+    #         for epoch in range(num_epochs):
+    #             beta_loss_all = []
+
+    #             batch_shuffled_idx = np.random.permutation(self.data.shape[0])
+    #             for i in tqdm(range(interval)):
+
+    #                 start_pt = i * batch_size
+    #                 end_pt = min((i + 1) * batch_size, self.data.shape[0])
+    #                 local_idx = batch_shuffled_idx[start_pt:end_pt]
+    #                 batch = self.data[local_idx, ...]
+    #                 batch_votes = self.votes_data[local_idx, ...]
+
+    #                 comp = torch.sigmoid(batch_votes - self.votes_data.T)
+    #                 pred_comp = self.model(batch)
+
+    #                 beta_loss = torch.mean((comp - pred_comp) ** 2)
+
+    #                 beta_loss_all.append(beta_loss)
+
+    #                 self.opt.zero_grad()
+    #                 beta_loss.backward()
+    #                 self.opt.step()
+    #                 self.scheduler.step()  # Update LR after each optimizer step
+
+    #             beta_loss_all = torch.stack(beta_loss_all, dim=0)
+    #             print("iteration:", epoch + 1)
+    #             print("mean_beta_loss_all:", torch.mean(beta_loss_all).item())
+
+    #             if save_dir is not None and (((epoch + 1) % 50 == 0) or ((epoch + 1) == num_epochs)):
+    #                 tmp_save_dir = Path(save_dir) / f'itr_{epoch + 1}'
+    #                 tmp_save_dir.mkdir(parents=True, exist_ok=True)
+    #                 model_file = tmp_save_dir / 'beta_model.pth'
+    #                 self.save_model(model_file)
+    #         self.ref_model = copy.deepcopy(self.model)
+    #     else:
+    #         self.load_model(load_dir)
+    #         self.ref_model = copy.deepcopy(self.model)
 
     def online_update(self, dataset, num_epochs=1, warm_up_epochs=0, batch_size=1, lr = 1.0e-6):
         interval = math.ceil(dataset["obs"].shape[0] / batch_size)

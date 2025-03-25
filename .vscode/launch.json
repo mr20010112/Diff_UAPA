@@ -10,10 +10,10 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "--config-name=pbrl_diffusion_transformer_lowdim_transport_online_workspace.yaml"
+                "--config-name=pbrl_diffusion_transformer_lift_hybrid_online_workspace.yaml"
             ],
             "env": {
-                "CUDA_VISIBLE_DEVICES": "3",
+                "CUDA_VISIBLE_DEVICES": "0",
             }
         }
     ]

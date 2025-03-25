@@ -193,7 +193,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 learning_rate=learning_rate, 
                 betas=tuple(betas))
 
-    def compute_loss(self, batch, ref_model: TransformerForDiffusion, avg_traj_loss=0.0):
+    def compute_loss(self, batch, ref_model: TransformerForDiffusion, avg_traj_loss=0.0, stride=1):
 
         ref_model.eval()
         for param in ref_model.parameters():
@@ -240,8 +240,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         obs_2 = nbatch_2['obs']
         action_2 = nbatch_2['action']
 
-        stride = 2*self.n_obs_steps
-
         obs_1 = slice_episode(obs_1, horizon=self.horizon, stride=stride)
         action_1 = slice_episode(action_1, horizon=self.horizon, stride=stride)
         obs_2 = slice_episode(obs_2, horizon=self.horizon, stride=stride)
@@ -286,13 +284,14 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
 
                 mask_1 = (self.horizon + (i-1)*stride) <= length_1
                 mask_1 = mask_1.int()
+                mask_1 = torch.squeeze(mask_1, dim=-1)
 
                 slice_loss_1 = torch.norm((pred_1 - noise_1) * loss_mask_1.type(pred_1.dtype), dim=-1) ** 2 \
                             - torch.norm((ref_pred_1 - noise_1) * loss_mask_1.type(ref_pred_1.dtype), dim=-1) ** 2
-                immitation_loss_1 = torch.norm((pred_1 - ref_pred_1) * loss_mask_1.type(pred_1.dtype), dim=-1) ** 2
+                immitation_loss_1 = torch.norm((pred_1 - noise_1) * loss_mask_1.type(pred_1.dtype), dim=-1) ** 2
 
-                traj_loss_1 += (slice_loss_1*mask_1) * (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device))).reshape(1, -1)
-                immitation_loss += (immitation_loss_1*mask_1) #* (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device))).reshape(1, -1)
+                traj_loss_1 += torch.sum((slice_loss_1) * (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device))).reshape(1, -1), dim=-1) * mask_1
+                immitation_loss += torch.sum(immitation_loss_1, dim=-1) * mask_1 #* (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device))).reshape(1, -1)
 
             for i in range(len(obs_2)):
                 obs_2_slide = obs_2[i]
@@ -323,25 +322,27 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
 
                 mask_2 = (self.horizon + (i-1)*stride) <= length_2
                 mask_2 = mask_2.int()
+                mask_2 = torch.squeeze(mask_2, dim=-1)
 
                 slice_loss_2 = torch.norm((pred_2 - noise_2) * loss_mask_2.type(pred_2.dtype), dim=-1) ** 2 \
                             - torch.norm((ref_pred_2 - noise_2) * loss_mask_2.type(ref_pred_2.dtype), dim=-1) ** 2
-                immitation_loss_2 = torch.norm((pred_2 - ref_pred_2) * loss_mask_2.type(pred_2.dtype), dim=-1) ** 2
+                immitation_loss_2 = torch.norm((pred_2 - noise_2) * loss_mask_2.type(pred_2.dtype), dim=-1) ** 2
                 # slice_loss_2 = F.mse_loss(pred_2 * loss_mask_2.type(pred_2.dtype), target * loss_mask_2.type(target.dtype), reduction='none')
 
-                traj_loss_2 += (slice_loss_2*mask_2) * (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device))).reshape(1, -1)
+                traj_loss_2 += torch.sum((slice_loss_2) * (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device))).reshape(1, -1), dim=-1) * mask_2
 
-                immitation_loss += (immitation_loss_2*mask_2) #* (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device))).reshape(1, -1)
+                immitation_loss += torch.sum(immitation_loss_2, dim=-1) * mask_2 #* (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device))).reshape(1, -1)
 
-            traj_loss_1 = torch.sum(traj_loss_1, dim=-1)
-            traj_loss_2 = torch.sum(traj_loss_2, dim=-1)
-            immitation_loss = torch.sum(immitation_loss, dim=-1)
+            # traj_loss_1 = torch.sum(traj_loss_1, dim=-1)
+            # traj_loss_2 = torch.sum(traj_loss_2, dim=-1)
+            # immitation_loss = torch.sum(immitation_loss, dim=-1)
 
             # term = torch.ones(timesteps.shape, device=self.device)
 
             traj_loss_1 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_1
             traj_loss_2 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_2
-            avg_traj_loss = torch.mean((traj_loss_1 + traj_loss_2)/2)
+            avg_traj_loss = -self.beta * self.noise_scheduler.config.num_train_timesteps * avg_traj_loss
+            # avg_traj_loss = torch.mean((traj_loss_1 + traj_loss_2)/2)
             
             immitation_loss = immitation_loss / ((len(obs_1)+len(obs_2))*self.horizon)
 

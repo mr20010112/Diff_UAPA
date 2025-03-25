@@ -215,7 +215,8 @@ class RobomimicReplayImageDataset(BaseImageDataset):
 
         torch_data = {
             'obs': dict_apply(obs_dict, torch.from_numpy),
-            'action': torch.from_numpy(data['action'].astype(np.float32))
+            'action': torch.from_numpy(data['action'].astype(np.float32)),
+            'reward': torch.from_numpy(data['reward'].astype(np.float32)),
         }
         return torch_data
 
@@ -310,7 +311,24 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                 compressor=None,
                 dtype=this_data.dtype
             )
-        
+
+        # save reward data
+        key = 'rewards'
+        this_data = np.array([], dtype=np.float32)
+        for i in range(len(demos)):
+            demo = demos[f'demo_{i}']
+            this_data = np.append(this_data, demo[key][:].astype(np.float32))
+        this_data = np.array(this_data).reshape(-1, 1)
+        # this_data = this_data.astype(np.float32)
+        _ = data_group.array(
+            name='reward',
+            data=this_data,
+            shape=this_data.shape,
+            chunks=this_data.shape,
+            compressor=None,
+            dtype=this_data.dtype
+        )
+
         def img_copy(zarr_arr, zarr_idx, hdf5_arr, hdf5_idx):
             try:
                 zarr_arr[zarr_idx] = hdf5_arr[hdf5_idx]

@@ -55,7 +55,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         )
         self.normalizer = LinearNormalizer()
         self.horizon = horizon
-        self.train_time_samples = train_time_samples,
+        self.train_time_samples = train_time_samples
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.n_action_steps = n_action_steps
@@ -191,7 +191,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 learning_rate=learning_rate, 
                 betas=tuple(betas))
 
-    def compute_loss(self, batch, ref_model: TransformerForDiffusion, avg_traj_loss=0.0):
+    def compute_loss(self, batch, ref_model: TransformerForDiffusion, avg_traj_loss=0.0, stride=1):
 
         ref_model.eval()
         for param in ref_model.parameters():
@@ -239,7 +239,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         obs_2 = nbatch_2['obs']
         action_2 = nbatch_2['action']
         
-        stride = self.n_obs_steps
+        stride = stride
 
         obs_1 = slice_episode(obs_1, horizon=self.horizon, stride=stride)
         action_1 = slice_episode(action_1, horizon=self.horizon, stride=stride)
@@ -255,7 +255,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
 
             traj_loss_1, traj_loss_2 = 0, 0
             # mseloss_1, mseloss_2 = 0, 0
-            condition_mask = []
 
             for i in range(len(obs_1)):
                 obs_1_slide = obs_1[i]
@@ -271,7 +270,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                     trajectory_1 = torch.cat([action_1_slide, obs_1_slide], dim=-1)
                 trajectory_1 = trajectory_1.to(self.device)
                 condition_mask_1 = self.mask_generator(trajectory_1.shape).to(self.device)
-                condition_mask.append(condition_mask_1)
                 noise_1 = torch.randn(trajectory_1.shape, device=self.device)
                 noisy_trajectory_1 = self.noise_scheduler.add_noise(trajectory_1, noise_1, timesteps_1)
 
@@ -305,7 +303,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                     trajectory_2 = torch.cat([action_2_slide, obs_2_slide], dim=-1)
                 trajectory_2 = trajectory_2.to(self.device)
                 # condition_mask_2 = self.mask_generator(trajectory_2.shape).to(self.device)
-                condition_mask_2 = condition_mask[i]
+                condition_mask_2 = self.mask_generator(trajectory_2.shape).to(self.device)
                 noise_2 = torch.randn(trajectory_2.shape, device=self.device)
                 noisy_trajectory_2 = self.noise_scheduler.add_noise(trajectory_2, noise_2, timesteps_2)
 

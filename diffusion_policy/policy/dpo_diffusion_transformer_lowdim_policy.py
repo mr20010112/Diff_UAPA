@@ -191,7 +191,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 learning_rate=learning_rate, 
                 betas=tuple(betas))
 
-    def compute_loss(self, batch, ref_model: TransformerForDiffusion, avg_traj_loss=0.0):
+    def compute_loss(self, batch, ref_model: TransformerForDiffusion, avg_traj_loss=0.0, stride=1):
 
         ref_model.eval()
         for param in ref_model.parameters():
@@ -238,7 +238,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         obs_2 = nbatch_2['obs']
         action_2 = nbatch_2['action']
 
-        stride = self.n_obs_steps
+        stride = stride
 
         obs_1 = slice_episode(obs_1, horizon=self.horizon, stride=stride)
         action_1 = slice_episode(action_1, horizon=self.horizon, stride=stride)

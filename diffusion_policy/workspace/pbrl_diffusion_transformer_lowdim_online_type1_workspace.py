@@ -189,7 +189,7 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
             pref_dataset.set_beta_priori(data_size=100)
             pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=50, warm_up_epochs=5, batch_size=5, lr=2.0e-5)
-            pref_dataset.update_beta_priori()
+            pref_dataset.update_beta_priori(batch_size=1)
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset
@@ -298,10 +298,11 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
                             # compute loss
                             avg_traj_loss = 0.0
-                            # if cfg.training.map.use_map:
-                            #     avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
-                            #                                           model = self.model, ref_model = ref_policy.model)
-                            raw_loss = self.model.compute_loss(batch, ref_model=ref_policy.model, avg_traj_loss = avg_traj_loss)
+                            stride = 2*self.model.n_obs_steps
+                            if cfg.training.map.use_map:
+                                avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
+                                                                      model = self.model, ref_model = ref_policy.model, stride=stride)
+                            raw_loss = self.model.compute_loss(batch, ref_model=ref_policy.model, avg_traj_loss = avg_traj_loss, stride=stride)
                             loss = raw_loss / cfg.training.gradient_accumulate_every
                             loss.backward()
 
