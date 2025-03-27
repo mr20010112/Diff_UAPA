@@ -122,21 +122,21 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         assert isinstance(dataset, BaseLowdimDataset)
         normalizer = dataset.get_normalizer()
 
-        # configure dataset
-        dataset_1: BaseLowdimDataset
-        dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
-        #device = torch.device(cfg.training.device_cpu)
-        assert isinstance(dataset_1, BaseLowdimDataset)
+        # # configure dataset
+        # dataset_1: BaseLowdimDataset
+        # dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
+        # #device = torch.device(cfg.training.device_cpu)
+        # assert isinstance(dataset_1, BaseLowdimDataset)
 
-        # configure dataset
-        dataset_2: BaseLowdimDataset
-        dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
-        # expert_normalizer = normal_dataset.get_normalizer()
-        assert isinstance(dataset_2, BaseLowdimDataset)
+        # # configure dataset
+        # dataset_2: BaseLowdimDataset
+        # dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
+        # # expert_normalizer = normal_dataset.get_normalizer()
+        # assert isinstance(dataset_2, BaseLowdimDataset)
 
         pref_dataset: BaseLowdimDataset
-        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset_1.replay_buffer, \
-                                               replay_buffer_2=dataset_2.replay_buffer) #cfg.task.perf_dataset
+        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset.replay_buffer, \
+                                               replay_buffer_2=dataset.replay_buffer) #cfg.task.perf_dataset
 
         # cut online groups
         votes_1, votes_2 = pref_dataset.pref_replay_buffer.meta['votes'], pref_dataset.pref_replay_buffer.meta['votes_2']
@@ -199,7 +199,7 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 all_votes_1[local_epoch_idx] = np.maximum(all_votes_1[local_epoch_idx], 0)
                 all_votes_2[local_epoch_idx] = np.maximum(all_votes_2[local_epoch_idx], 0)
 
-        time.sleep(1)
+        time.sleep(0.5)
         stage1_time = datetime.now()
         logger.info(f"Initialisation is complete: {(stage1_time - start_time).total_seconds():.2f} seconds")
 
@@ -213,13 +213,13 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
 
             pref_dataset.set_beta_priori(data_size=100)
-            pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=25, warm_up_epochs=2, batch_size=10    , lr=2.0e-5)
+            pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=25, warm_up_epochs=2, batch_size=20, lr=2.0e-5)
             pref_dataset.update_beta_priori(batch_size=1)
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset
 
-        time.sleep(1)
+        time.sleep(0.5)
         stage2_time = datetime.now()
         logger.info(f"The beta model is trained: {(stage2_time - stage1_time).total_seconds():.2f} seconds")
 
@@ -281,7 +281,7 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             cfg.training.val_every = 1
             cfg.training.sample_every = 1
 
-        time.sleep(1)
+        time.sleep(0.5)
         stage3_time = datetime.now()
         logger.info(f"Training begin: {(stage3_time - stage2_time).total_seconds():.2f} seconds")
 
@@ -318,6 +318,11 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                     step_log = dict()
                     # ========= train for this epoch ==========
                     self.model.train()
+
+                    time.sleep(0.5)
+                    stage_time_last = datetime.now()
+                    logger.info(f'Epoch {local_epoch_idx + 1} Start: {stage_time_last} seconds')
+
                     if self.ema_model is not None:
                         self.ema_model.train()
                     train_losses = list()
@@ -376,6 +381,10 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                     # replace train_loss with epoch average
                     train_loss = np.mean(train_losses)
                     step_log['train_loss'] = train_loss
+
+                    time.sleep(0.5)
+                    stage_time_now = datetime.now()
+                    logger.info(f'Epoch {local_epoch_idx + 1} Spending time:{stage_time_now - stage_time_last} End: {stage_time_now} seconds')
 
                     # ========= eval for this epoch ==========
                     policy = self.model
@@ -461,12 +470,13 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                     self.global_step += 1
                     self.epoch += 1
 
-        time.sleep(1)
+
+        time.sleep(0.5)
         stage4_time = datetime.now()
         logger.info(f"Training complete: {(stage4_time - stage3_time).total_seconds():.2f} seconds")
 
         end_time = datetime.now()
-        logger.info(f"Total time spent: {(end_time - start_time).total_seconds():.2f} 秒")
+        logger.info(f"Total time spent: {(end_time - start_time).total_seconds():.2f} s")
 
 @hydra.main(
     version_base=None,

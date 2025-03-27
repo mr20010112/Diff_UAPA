@@ -80,14 +80,14 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 80
+  batch_size: 60
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 80
+  batch_size: 60
   num_workers: 1
   shuffle: True
   pin_memory: True
@@ -115,8 +115,8 @@ training:
   use_ema: True
   # training loop control
   # in epochs
-  rollout_every: 20
-  checkpoint_every: 20
+  rollout_every: 200
+  checkpoint_every: 200
   val_every: 1
   sample_every: 5
   # steps per epoch
@@ -127,14 +127,14 @@ training:
   dataset_1_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.5.h5'
   dataset_2_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.5_2.h5'
   online:
-    num_groups: 4
+    num_groups: 1
     all_votes: 100
     reverse_ratio: 0.2
     reverse_rate: 0.5
     reverse_freq: 1
     update_history: False
   map:
-    use_map: False
+    use_map: True #False
     map_ratio: 0.25
 
 

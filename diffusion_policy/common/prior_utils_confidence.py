@@ -15,6 +15,9 @@ from torch.optim.lr_scheduler import SequentialLR, LinearLR, CosineAnnealingLR
 from diffusion_policy.policy.diffusion_transformer_hybrid_image_policy import DiffusionTransformerHybridImagePolicy
 from diffusion_policy.common.pytorch_util import dict_apply
 
+import time
+import logging
+from datetime import datetime
 
 Batch = collections.namedtuple(
     'Batch',
@@ -368,10 +371,21 @@ class BetaNetwork(nn.Module):
             cosine_scheduler = CosineAnnealingLR(self.opt, T_max=main_steps)
             self.scheduler = SequentialLR(self.opt, schedulers=[warm_up_scheduler, cosine_scheduler], milestones=[warm_up_steps])
 
+            logger = logging.getLogger()
+            time.sleep(0.5)
+            stage_time = datetime.now()
+            logger.info(f'Beta Model Training Start: {stage_time} seconds')
+
+
             for epoch in range(num_epochs):
                 beta_loss_all = []
-
                 batch_shuffled_idx = np.random.permutation(self.data.shape[0])
+
+                time.sleep(0.5)
+                stage_time_last = datetime.now()
+                logger.info(f'Epoch {epoch + 1} Start: {stage_time_last} seconds')
+
+
                 for i in tqdm(range(interval)):
 
                     start_pt = i * batch_size
@@ -396,6 +410,10 @@ class BetaNetwork(nn.Module):
                 print("iteration:", epoch + 1)
                 print("mean_beta_loss_all:", torch.mean(beta_loss_all).item())
 
+                time.sleep(0.5)
+                stage_time_last = datetime.now()
+                logger.info(f'Epoch {epoch + 1} End: {stage_time_last} seconds')
+
                 if save_dir is not None and (((epoch + 1) % 50 == 0) or ((epoch + 1) == num_epochs)):
                     tmp_save_dir = Path(save_dir) / f'itr_{epoch + 1}'
                     tmp_save_dir.mkdir(parents=True, exist_ok=True)
@@ -419,10 +437,19 @@ class BetaNetwork(nn.Module):
         cosine_scheduler = CosineAnnealingLR(self.opt, T_max=main_steps)
         self.scheduler = SequentialLR(self.opt, schedulers=[warm_up_scheduler, cosine_scheduler], milestones=[warm_up_steps])
 
+        logger = logging.getLogger()
+        time.sleep(0.5)
+        stage_time = datetime.now()
+        logger.info(f'Beta Model Training Start: {stage_time} seconds')
+
         for epoch in range(num_epochs):
             beta_loss_all = []
-
             batch_shuffled_idx = np.random.permutation(dataset["obs"].shape[0])
+
+            time.sleep(0.5)
+            stage_time_last = datetime.now()
+            logger.info(f'Epoch {epoch + 1} Start: {stage_time_last} seconds')
+
             for i in tqdm(range(interval)):
 
                 start_pt = i * batch_size
@@ -465,6 +492,11 @@ class BetaNetwork(nn.Module):
                 beta_loss.backward()
                 self.opt.step()
                 self.scheduler.step()  # Update LR after each optimizer step
+
+
+            time.sleep(0.5)
+            stage_time_now = datetime.now()
+            logger.info(f'Epoch {epoch + 1} Spending time:{stage_time_now - stage_time_last} End: {stage_time_now} seconds')
 
             beta_loss_all = torch.stack(beta_loss_all, dim=0)
             print("iteration:", epoch + 1)

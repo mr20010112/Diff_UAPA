@@ -35,6 +35,10 @@ from diffusion_policy.model.common.normalizer import (
 from diffusion_policy.common.json_logger import JsonLogger
 from diffusers.training_utils import EMAModel
 
+import time
+import logging
+from datetime import datetime
+
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 # %%
@@ -65,12 +69,24 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         cfg = copy.deepcopy(self.cfg)
         OmegaConf.resolve(cfg)
 
+        logging.basicConfig(
+            filename='execution_log.log',
+            level=logging.INFO,
+            format='%(asctime)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+
+        logger = logging.getLogger()
+
+        start_time = datetime.now()
+        logger.info("Program Begin")
+
         # resume training
         if cfg.training.resume:
-            lastest_ckpt_path = self.get_checkpoint_path()
-            if lastest_ckpt_path.is_file():
-                print(f"Resuming from checkpoint {lastest_ckpt_path}")
-                self.load_checkpoint(path=lastest_ckpt_path)
+            ckpt_path = pathlib.Path(cfg.checkpoint_dir)
+            if ckpt_path.is_file():
+                print(f"Resuming from checkpoint {ckpt_path}")
+                self.load_checkpoint(path=ckpt_path)
             self.optimizer = self.policy.get_optimizer(**cfg.optimizer)
             self.global_step = 0
             self.epoch = 0
@@ -239,6 +255,11 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
             cfg.training.val_every = 1
             cfg.training.sample_every = 1
 
+        time.sleep(0.5)
+        stage1_time = datetime.now()
+        logger.info(f"Initialisation is complete: {(stage1_time - start_time).total_seconds():.2f} seconds")
+        logger.info(f"Training begin: {datetime.now()}")
+
         # training loop
         log_path = os.path.join(self.output_dir, 'logs.json.txt')
         with JsonLogger(log_path) as json_logger:
@@ -274,6 +295,11 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                     step_log = dict()
                     # ========= train for this epoch ==========
                     train_losses = list()
+
+                    time.sleep(0.5)
+                    stage_time_last = datetime.now()
+                    logger.info(f'Epoch {local_epoch_idx + 1} Start: {stage_time_last} seconds')
+
                     with tqdm.tqdm(train_dataloader, desc=f"Training epoch {self.epoch}", 
                             leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
                         for batch_idx, batch in enumerate(tepoch):
@@ -325,6 +351,10 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                     # replace train_loss with epoch average
                     train_loss = np.mean(train_losses)
                     step_log['train_loss'] = train_loss
+
+                    time.sleep(0.5)
+                    stage_time_now = datetime.now()
+                    logger.info(f'Epoch {local_epoch_idx + 1} Spending time:{stage_time_now - stage_time_last} End: {stage_time_now} seconds')
 
                     # ========= eval for this epoch ==========
                     self.policy.eval()
@@ -405,6 +435,13 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                     json_logger.log(step_log)
                     self.global_step += 1
                     self.epoch += 1
+
+        time.sleep(0.5)
+        stage2_time = datetime.now()
+        logger.info(f"Training complete: {(stage2_time - stage1_time).total_seconds():.2f} seconds")
+
+        end_time = datetime.now()
+        logger.info(f"Total time spent: {(end_time - start_time).total_seconds():.2f} s")
 
 @hydra.main(
     version_base=None,
