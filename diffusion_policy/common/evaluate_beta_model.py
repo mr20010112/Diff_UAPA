@@ -1,6 +1,6 @@
 import torch
 from rlhf.reward_model import MLPRewardModel, TransformerRewardModel,ItrTransformerRewardModel
-from utils import BetaNetwork
+from diffusion_policy.common.reward_utils import BetaNetwork
 from rlhf.train_reward_model import load_queries_with_indices
 import numpy as np
 from fast_track.generate_d4rl_fake_labels import load_local_offline_dataset

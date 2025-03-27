@@ -50,13 +50,14 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         np.random.seed(seed)
         random.seed(seed)
 
+        self.reward_model = hydra.utils.instantiate(cfg.reward_model)
+
         # configure model
         self.policy: BETLowdimPolicy
         self.policy = hydra.utils.instantiate(cfg.policy)
 
         # configure training state
         self.optimizer = self.policy.get_optimizer(**cfg.optimizer)
-        self.reward_optimizer = self.policy.get_reward_optimizer(**cfg.optimizer)
 
         self.global_step = 0
         self.epoch = 0
@@ -106,20 +107,20 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         #         normalizer['action'].normalize(
         #             dataset.get_all_actions()))
 
-        # configure dataset
-        dataset_1: BaseLowdimDataset
-        dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
-        assert isinstance(dataset_1, BaseLowdimDataset)
+        # # configure dataset
+        # dataset_1: BaseLowdimDataset
+        # dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
+        # assert isinstance(dataset_1, BaseLowdimDataset)
 
 
-        # configure dataset
-        dataset_2: BaseLowdimDataset
-        dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
-        assert isinstance(dataset_2, BaseLowdimDataset)
+        # # configure dataset
+        # dataset_2: BaseLowdimDataset
+        # dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
+        # assert isinstance(dataset_2, BaseLowdimDataset)
 
         pref_dataset: BaseLowdimDataset
-        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset_1.replay_buffer, \
-                                               replay_buffer_2=dataset_2.replay_buffer) #cfg.task.perf_dataset
+        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset.replay_buffer, \
+                                               replay_buffer_2=dataset.replay_buffer) #cfg.task.perf_dataset
 
         # cut online groups
         votes_1, votes_2 = pref_dataset.pref_replay_buffer.meta['votes'], pref_dataset.pref_replay_buffer.meta['votes_2']
@@ -227,7 +228,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         device = torch.device(cfg.training.device_gpu)
         self.policy.to(device)
         optimizer_to(self.optimizer, device)
-        optimizer_to(self.reward_optimizer, device)
+        self.reward_model.to(device)
 
         # save batch for sampling
         train_sampling_batch = None
@@ -271,15 +272,29 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                 )
 
                 print("Training reward model...")
-                train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
-                for reward_epoch in range(cfg.training.reward_epochs):  # 新增超参数 reward_epochs
-                    reward_losses = []
-                    with tqdm.tqdm(train_dataloader, desc=f"Reward training epoch {reward_epoch}") as tepoch:
-                        for batch in tepoch:
-                            batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
-                            reward_loss = self.policy.train_reward_model(batch, self.reward_optimizer)
-                            reward_losses.append(reward_loss)
-                            tepoch.set_postfix(reward_loss=reward_loss)
+                votes_1 = pref_dataset.pref_replay_buffer.meta['votes']
+                votes_2 = pref_dataset.pref_replay_buffer.meta['votes_2']
+
+                threshold = 1e-2
+                diff = np.abs(votes_1 - votes_2)
+                condition_1 = (votes_1 > votes_2) & (diff >= threshold)  # votes_1 > votes_2 and diff >= threshold
+                condition_2 = (votes_1 < votes_2) & (diff >= threshold)  # votes_1 < votes_2 and diff >= threshold
+
+                votes_1 = np.where(condition_1, 1.0, 0.0)
+                votes_1 = np.squeeze(votes_1, axis=-1)  # NumPy uses axis instead of dim
+                votes_2 = np.where(condition_2, 1.0, 0.0)
+                votes_2 = np.squeeze(votes_2, axis=-1)
+
+                labels = np.concatenate([votes_1, votes_2], axis=1)
+                
+                pref_data = {
+                    'observations': pref_dataset.pref_replay_buffer['obs'],
+                    'actions': pref_dataset.pref_replay_buffer['action'],
+                    'observations_2': pref_dataset.pref_replay_buffer['obs_2'],
+                    'actions_2': pref_dataset.pref_replay_buffer['action_2'],
+                    'labels': labels  # 假设 votes 是偏好标签
+                }
+                self.reward_model.train(pref_data, n_epochs=cfg.training.reward_epochs, batch_size=cfg.dataloader.batch_size)
 
                 train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
                 for local_epoch_idx in range(cfg.training.num_epochs):
