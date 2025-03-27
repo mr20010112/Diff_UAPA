@@ -1,18 +1,19 @@
 defaults:
   - _self_
-  - task: can_lowdim_abs
+  - task: kitchen_lowdim_abs
 
 name: train_diffusion_transformer_lowdim
 _target_: diffusion_policy.workspace.train_diffusion_transformer_lowdim_workspace.TrainDiffusionTransformerLowdimWorkspace
+checkpoint_dir: 'data/experiments/low_dim/robomimic/can/diff/ours/latest.ckpt'
 
 obs_dim: ${task.obs_dim}
 action_dim: ${task.action_dim}
 task_name: ${task.name}
 exp_name: "default"
 
-horizon: 5
-n_obs_steps: 3
-n_action_steps: 1
+horizon: 16
+n_obs_steps: 4
+n_action_steps: 8
 n_latency_steps: 0
 past_action_visible: False
 keypoint_visible_rate: 1.0
@@ -32,9 +33,9 @@ policy:
 
     n_layer: 8
     n_head: 4
-    n_emb: 256
+    n_emb: 768
     p_drop_emb: 0.0
-    p_drop_attn: 0.3
+    p_drop_attn: 0.1
 
     causal_attn: True
     time_as_cond: True # if false, use BERT like encoder only arch, time as input
@@ -72,7 +73,7 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 256
+  batch_size: 256 #change
   num_workers: 1
   shuffle: True
   pin_memory: True
@@ -92,20 +93,20 @@ optimizer:
 
 training:
   device: "cuda:0"
-  seed: 42
+  seed: 42 #42 #1337 #3407
   debug: False
   resume: True
   # optimization
   lr_scheduler: cosine
   # Transformer needs LR warmup
-  lr_warmup_steps: 1000
-  num_epochs: 5000
+  lr_warmup_steps: 0 #change
+  num_epochs: 10 #change
   gradient_accumulate_every: 1
   use_ema: True
   # training loop control
   # in epochs
-  rollout_every: 50
-  checkpoint_every: 50
+  rollout_every: 1 #change
+  checkpoint_every: 25000 #change
   val_every: 1
   sample_every: 5
   # steps per epoch
