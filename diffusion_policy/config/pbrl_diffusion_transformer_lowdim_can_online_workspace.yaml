@@ -3,7 +3,7 @@ defaults:
   - task: can_lowdim_abs #kitchen_lowdim_abs
 
 name: train_diffusion_transformer_lowdim
-_target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type2_workspace.PbrlDiffusionTransformerLowdimWorkspace #_type1_, _type2_
+_target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type1_workspace.PbrlDiffusionTransformerLowdimWorkspace #_type1_, _type2_
 checkpoint_dir: 'data/experiments/low_dim/robomimic/can/diff/base/epoch=0070-test_mean_score=0.600.ckpt'
 
 obs_dim: ${task.obs_dim}
@@ -54,7 +54,7 @@ policy:
     prediction_type: epsilon # or sample
 
   gamma: ${gamma}
-  beta: 5.0e-5 #dpo:0.0005; cpl:0.00003125; ours:5.0e-5
+  beta: 1.0e-4 #dpo:0.0005; cpl:0.00003125; ours:1.0e-4
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
   bias_reg: 0.25
@@ -94,7 +94,7 @@ val_dataloader:
   persistent_workers: False
 
 optimizer:
-  learning_rate: 1.0e-4
+  learning_rate: 2.0e-5
   weight_decay: 1.0e-3
   betas: [0.9, 0.95]
 

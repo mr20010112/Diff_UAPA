@@ -13,7 +13,7 @@
                 "--config-name=pbrl_diffusion_transformer_lowdim_kitchen_online_workspace.yaml"
             ],
             "env": {
-                "CUDA_VISIBLE_DEVICES": "0",
+                "CUDA_VISIBLE_DEVICES": "1",
             }
         }
     ]

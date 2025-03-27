@@ -4,7 +4,7 @@ defaults:
 
 name: train_diffusion_transformer_lowdim
 _target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type1_workspace.PbrlDiffusionTransformerLowdimWorkspace #_type1_, _type2_
-checkpoint_dir: 'data/experiments/low_dim/kitchen/diff/base_0.5/seed=42.ckpt'
+checkpoint_dir: 'data/experiments/low_dim/kitchen/diffusion_policy_transformer/base_0.5/seed=42.ckpt'
 
 obs_dim: ${task.obs_dim}
 action_dim: ${task.action_dim}
@@ -54,7 +54,7 @@ policy:
     prediction_type: epsilon # or sample
 
   gamma: ${gamma}
-  beta: 7.14e-05 #cpl:1.785e-06 ;dpo:1.785e-06 ours:3.57e-05
+  beta: 3.57e-05 #cpl:1.785e-06 ;dpo:1.785e-06 ours:3.57e-05
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
   bias_reg: 0.25
@@ -80,21 +80,21 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 19
+  batch_size: 18
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 19
+  batch_size: 18
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 optimizer:
-  learning_rate: 2.5e-5
+  learning_rate: 2.0e-5
   weight_decay: 1.0e-3
   betas: [0.9, 0.95]
 
@@ -108,7 +108,7 @@ training:
   lr_scheduler: cosine
   # Transformer needs LR warmup
   lr_warmup_steps: 0
-  num_epochs: 100
+  num_epochs: 10
   # lr_end: 1.0e-8
   # power: 1.5
   gradient_accumulate_every: 1
@@ -127,14 +127,14 @@ training:
   dataset_1_dir: 'data/kitchen/Minari/normal/base_0.5/kitchen_data_0.5.h5'
   dataset_2_dir: 'data/kitchen/Minari/normal/base_0.5/kitchen_data_0.5.h5'
   online:
-    num_groups: 4
+    num_groups: 1 #4
     all_votes: 100
     reverse_ratio: 0.2
     reverse_rate: 0.5 #0.25, 0.5, 0.75
     reverse_freq: 1
     update_history: False
   map:
-    use_map: False # only True when use our method
+    use_map: True # only True when use our method
     map_ratio: 0.25
 
 

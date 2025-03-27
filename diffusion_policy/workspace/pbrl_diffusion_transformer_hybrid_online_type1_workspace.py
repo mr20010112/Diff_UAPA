@@ -92,6 +92,18 @@ class PbrlDiffusionTransformerHybridWorkspace(BaseWorkspace):
         if cfg.training.use_ema:
             self.ema_model.set_normalizer(normalizer)
 
+        # # configure dataset
+        # dataset_1: BaseLowdimDataset
+        # dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
+        # #device = torch.device(cfg.training.device_cpu)
+        # assert isinstance(dataset_1, BaseLowdimDataset)
+
+        # # configure dataset
+        # dataset_2: BaseLowdimDataset
+        # dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
+        # # expert_normalizer = normal_dataset.get_normalizer()
+        # assert isinstance(dataset_2, BaseLowdimDataset)
+
         pref_dataset: BaseImageDataset
         pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, dataset_1=dataset, \
                                                dataset_2=dataset) #cfg.task.perf_dataset

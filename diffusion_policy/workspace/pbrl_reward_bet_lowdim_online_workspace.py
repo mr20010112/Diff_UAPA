@@ -19,39 +19,26 @@ import wandb
 import tqdm
 import numpy as np
 import shutil
-import math
 import scipy.stats as stats
-import matplotlib.pyplot as plt
-from scipy.stats import beta
-from typing import Optional, Dict
 
 from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
-from diffusion_policy.common.prior_utils_confidence import BetaNetwork
+from diffusion_policy.model.common.lr_scheduler import get_scheduler
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
-from diffusion_policy.policy.base_lowdim_policy import BaseLowdimPolicy
-from diffusion_policy.policy.diffusion_transformer_lowdim_policy import DiffusionTransformerLowdimPolicy
+from diffusion_policy.policy.bet_lowdim_policy import BETLowdimPolicy
 from diffusion_policy.dataset.base_dataset import BaseLowdimDataset
 from diffusion_policy.env_runner.base_lowdim_runner import BaseLowdimRunner
 from diffusion_policy.common.checkpoint_util import TopKCheckpointManager
+from diffusion_policy.model.common.normalizer import (
+    LinearNormalizer, 
+    SingleFieldLinearNormalizer
+)
 from diffusion_policy.common.json_logger import JsonLogger
-from diffusion_policy.model.common.lr_scheduler import get_scheduler
-import torch.nn.functional as F
 from diffusers.training_utils import EMAModel
-from torch.cuda.amp import GradScaler, autocast 
-from diffusion_policy.model.common.slice import slice_episode
-from diffusion_policy.common.compute_all_loss import compute_all_traj_loss
-
-#recording
-import pynvml
-import time
-import threading
-import logging
-from datetime import datetime
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 # %%
-class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
+class PbrlBETLowdimWorkspace(BaseWorkspace):
     include_keys = ['global_step', 'epoch']
 
     def __init__(self, cfg: OmegaConf):
@@ -64,74 +51,70 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         random.seed(seed)
 
         # configure model
-        self.model: DiffusionTransformerLowdimPolicy
-        #print(cfg.policy)
-        self.model = hydra.utils.instantiate(cfg.policy)
-
-        self.ema_model: DiffusionTransformerLowdimPolicy = None
-        if cfg.training.use_ema:
-            self.ema_model = copy.deepcopy(self.model)
+        self.policy: BETLowdimPolicy
+        self.policy = hydra.utils.instantiate(cfg.policy)
 
         # configure training state
-        self.optimizer = self.model.get_optimizer(**cfg.optimizer)
+        self.optimizer = self.policy.get_optimizer(**cfg.optimizer)
+        self.reward_optimizer = self.policy.get_reward_optimizer(**cfg.optimizer)
 
         self.global_step = 0
         self.epoch = 0
 
 
-
     def run(self):
         cfg = copy.deepcopy(self.cfg)
-
-        logging.basicConfig(
-            filename='execution_log.log',
-            level=logging.INFO,
-            format='%(asctime)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-
-        logger = logging.getLogger()
-
-        start_time = datetime.now()
-        logger.info("Program Begin")
+        OmegaConf.resolve(cfg)
 
         # resume training
         if cfg.training.resume:
-            ckpt_path = pathlib.Path(cfg.checkpoint_dir)
-            if ckpt_path.is_file():
-                print(f"Resuming from checkpoint {ckpt_path}")
-                self.load_checkpoint(path=ckpt_path)
-            self.optimizer = self.model.get_optimizer(**cfg.optimizer)
+            lastest_ckpt_path = self.get_checkpoint_path()
+            if lastest_ckpt_path.is_file():
+                print(f"Resuming from checkpoint {lastest_ckpt_path}")
+                self.load_checkpoint(path=lastest_ckpt_path)
+            self.optimizer = self.policy.get_optimizer(**cfg.optimizer)
             self.global_step = 0
             self.epoch = 0
 
         device = torch.device(cfg.training.device_gpu)
-        ref_policy = copy.deepcopy(self.model)
-        # ref_model.double()
-        ref_policy.train()  #.eval() 
+        ref_policy = copy.deepcopy(self.policy)
+        # ref_policy.double()
+        ref_policy.eval() 
         for param in ref_policy.parameters():
             param.requires_grad = False
         ref_policy.to(device)
 
-        #device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") #add
-
         # configure dataset
         dataset: BaseLowdimDataset
         dataset = hydra.utils.instantiate(cfg.task.origin_dataset)
-        #device = torch.device(cfg.training.device_cpu)
         assert isinstance(dataset, BaseLowdimDataset)
-        normalizer = dataset.get_normalizer()
+        train_dataloader = DataLoader(dataset, **cfg.dataloader)
+
+        # set normalizer
+        normalizer = None
+        if cfg.training.enable_normalizer:
+            normalizer = dataset.get_normalizer()
+        else:
+            normalizer = LinearNormalizer()
+            normalizer['action'] = SingleFieldLinearNormalizer.create_identity()
+            normalizer['obs'] = SingleFieldLinearNormalizer.create_identity()
+
+        # self.policy.set_normalizer(normalizer)
+
+        # # fit action_ae (K-Means)
+        # self.policy.fit_action_ae(
+        #         normalizer['action'].normalize(
+        #             dataset.get_all_actions()))
 
         # configure dataset
         dataset_1: BaseLowdimDataset
         dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
-        #device = torch.device(cfg.training.device_cpu)
         assert isinstance(dataset_1, BaseLowdimDataset)
+
 
         # configure dataset
         dataset_2: BaseLowdimDataset
         dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
-        # expert_normalizer = normal_dataset.get_normalizer()
         assert isinstance(dataset_2, BaseLowdimDataset)
 
         pref_dataset: BaseLowdimDataset
@@ -163,7 +146,7 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         votes_1_norm = (votes_1 - votes_min) / (votes_max - votes_min + 1e-8)
         votes_2_norm = (votes_2 - votes_min) / (votes_max - votes_min + 1e-8)
 
-        scale_factor = 5
+        scale_factor = 10
         votes_1 = votes_1_norm * scale_factor
         votes_2 = votes_2_norm * scale_factor
 
@@ -186,54 +169,34 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         # add noise to votes
         for local_epoch_idx in range(cfg.training.online.num_groups):
             if local_epoch_idx % cfg.training.online.reverse_freq == 0:
-                # delta = np.round(cfg.training.online.all_votes / cfg.training.online.num_groups * cfg.training.online.reverse_rate)
                 X = stats.truncnorm(-3, 3, loc=cfg.training.online.reverse_rate, scale=cfg.training.online.reverse_rate/3)
                 noise_ratio = X.rvs(all_votes_1.shape[1])
                 noise_ratio = noise_ratio.reshape(-1, 1)
 
                 # condiction = (all_votes_1[local_epoch_idx] > all_votes_2[local_epoch_idx])
-                all_votes_1[local_epoch_idx][indices], all_votes_2[local_epoch_idx][indices] = all_votes_1[local_epoch_idx][indices] + np.round((all_votes_2[local_epoch_idx][indices] - all_votes_1[local_epoch_idx][indices]) * noise_ratio[indices]), \
-                                                                            all_votes_2[local_epoch_idx][indices] + np.round((all_votes_1[local_epoch_idx][indices] - all_votes_2[local_epoch_idx][indices]) * noise_ratio[indices])
+                all_votes_1[local_epoch_idx][indices], all_votes_2[local_epoch_idx][indices] = \
+                    all_votes_1[local_epoch_idx][indices] + np.round((all_votes_2[local_epoch_idx][indices] - all_votes_1[local_epoch_idx][indices]) * noise_ratio[indices]), \
+                    all_votes_2[local_epoch_idx][indices] + np.round((all_votes_1[local_epoch_idx][indices] - all_votes_2[local_epoch_idx][indices]) * noise_ratio[indices])
                 
 
                 all_votes_1[local_epoch_idx] = np.maximum(all_votes_1[local_epoch_idx], 0)
                 all_votes_2[local_epoch_idx] = np.maximum(all_votes_2[local_epoch_idx], 0)
 
-        time.sleep(1)
-        stage1_time = datetime.now()
-        logger.info(f"Initialisation is complete: {(stage1_time - start_time).total_seconds():.2f} seconds")
-
-        if cfg.training.map.use_map:    
-            init_votes_1 = np.sum(all_votes_1, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
-            init_votes_2 = np.sum(all_votes_2, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
-
-            pref_dataset.pref_replay_buffer.meta['votes'] = init_votes_1.reshape(-1, 1)
-            pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2.reshape(-1, 1)
-            pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
-            pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
-
-            pref_dataset.set_beta_priori(data_size=100)
-            pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=25, warm_up_epochs=2, batch_size=10    , lr=2.0e-5)
-            pref_dataset.update_beta_priori(batch_size=1)
-
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset
 
-        time.sleep(1)
-        stage2_time = datetime.now()
-        logger.info(f"The beta model is trained: {(stage2_time - stage1_time).total_seconds():.2f} seconds")
-
-        self.model.set_normalizer(normalizer)
-        if cfg.training.use_ema:
-            # self.ema_model.double()
-            self.ema_model.set_normalizer(normalizer)
-
-        # configure ema
-        ema: EMAModel = None
-        if cfg.training.use_ema:
-            ema = hydra.utils.instantiate(
-                cfg.ema,
-                model=self.ema_model)
+        # configure lr scheduler
+        lr_scheduler = get_scheduler(
+            cfg.training.lr_scheduler,
+            optimizer=self.optimizer,
+            num_warmup_steps=cfg.training.lr_warmup_steps,
+            num_training_steps=(
+                len(train_dataloader) * cfg.training.num_epochs) \
+                    // cfg.training.gradient_accumulate_every,
+            # pytorch assumes stepping LRScheduler every epoch
+            # however huggingface diffusers steps it every batch
+            last_epoch=self.global_step-1
+        )
 
         # configure env runner
         env_runner: BaseLowdimRunner
@@ -251,7 +214,6 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         wandb.config.update(
             {
                 "output_dir": self.output_dir,
-                "timeout": 300,
             }
         )
 
@@ -263,11 +225,9 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
         # device transfer
         device = torch.device(cfg.training.device_gpu)
-        self.model.to(device)
-        if self.ema_model is not None:
-            self.ema_model.to(device)
-        #device = torch.device(cfg.training.device_gpu)
+        self.policy.to(device)
         optimizer_to(self.optimizer, device)
+        optimizer_to(self.reward_optimizer, device)
 
         # save batch for sampling
         train_sampling_batch = None
@@ -281,28 +241,24 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             cfg.training.val_every = 1
             cfg.training.sample_every = 1
 
-        time.sleep(1)
-        stage3_time = datetime.now()
-        logger.info(f"Training begin: {(stage3_time - stage2_time).total_seconds():.2f} seconds")
-
         # training loop
-        device = torch.device(cfg.training.device_gpu)
         log_path = os.path.join(self.output_dir, 'logs.json.txt')
         with JsonLogger(log_path) as json_logger:
             for online_epoch_idx in range(cfg.training.online.num_groups):
                 print(f"Round {online_epoch_idx + 1} of {cfg.training.online.num_groups} for online training")
 
-                local_votes_1 = np.array(all_votes_1[online_epoch_idx].T, dtype=np.float32).reshape(-1, 1)
-                local_votes_2 = np.array(all_votes_2[online_epoch_idx].T, dtype=np.float32).reshape(-1, 1)
+                local_votes_1 = np.array(all_votes_1[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \
+                                        (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
+                
+                local_votes_2 = np.array(all_votes_2[online_epoch_idx].T / (all_votes_1[online_epoch_idx].T + \
+                                        (all_votes_2[online_epoch_idx].T)), dtype=np.float32).reshape(-1, 1)
 
                 pref_dataset.pref_replay_buffer.meta['votes'] = local_votes_1
                 pref_dataset.pref_replay_buffer.meta['votes_2'] = local_votes_2
                 pref_dataset.pref_replay_buffer.root['meta']['votes'] = local_votes_1
                 pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = local_votes_2
 
-                train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
-
-                self.optimizer = self.model.get_optimizer(**cfg.optimizer)
+                self.optimizer = self.policy.get_optimizer(**cfg.optimizer)
 
                 lr_scheduler = get_scheduler(
                     cfg.training.lr_scheduler,
@@ -314,12 +270,21 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                     last_epoch=-1,
                 )
 
+                print("Training reward model...")
+                train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
+                for reward_epoch in range(cfg.training.reward_epochs):  # 新增超参数 reward_epochs
+                    reward_losses = []
+                    with tqdm.tqdm(train_dataloader, desc=f"Reward training epoch {reward_epoch}") as tepoch:
+                        for batch in tepoch:
+                            batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
+                            reward_loss = self.policy.train_reward_model(batch, self.reward_optimizer)
+                            reward_losses.append(reward_loss)
+                            tepoch.set_postfix(reward_loss=reward_loss)
+
+                train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
                 for local_epoch_idx in range(cfg.training.num_epochs):
                     step_log = dict()
                     # ========= train for this epoch ==========
-                    self.model.train()
-                    if self.ema_model is not None:
-                        self.ema_model.train()
                     train_losses = list()
                     with tqdm.tqdm(train_dataloader, desc=f"Training epoch {self.epoch}", 
                             leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
@@ -330,25 +295,21 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                                 train_sampling_batch = batch
 
                             # compute loss
-                            avg_traj_loss = 0.0
-                            stride = int(np.round(self.model.horizon * 0.5))
-                            if cfg.training.map.use_map:
-                                avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
-                                                                      model = self.model, ref_model = ref_policy.model, stride=stride)
-                            raw_loss = self.model.compute_loss(batch, ref_model=ref_policy.model, avg_traj_loss = avg_traj_loss, stride=stride)
+                            # torch.autograd.set_detect_anomaly(True)
+                            raw_loss = self.policy.compute_loss(batch, ref_policy=ref_policy)
                             loss = raw_loss / cfg.training.gradient_accumulate_every
                             loss.backward()
 
-                            
+                            # clip grad norm
+                            torch.nn.utils.clip_grad_norm_(
+                                self.policy.state_prior.parameters(), cfg.training.grad_norm_clip
+                            )
+
                             # step optimizer
                             if self.global_step % cfg.training.gradient_accumulate_every == 0:
                                 self.optimizer.step()
-                                self.optimizer.zero_grad()
+                                self.optimizer.zero_grad(set_to_none=True)
                                 lr_scheduler.step()
-
-                            # update ema
-                            if cfg.training.use_ema:
-                                ema.step(self.model)
 
                             # logging
                             raw_loss_cpu = raw_loss.item()
@@ -378,14 +339,11 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                     step_log['train_loss'] = train_loss
 
                     # ========= eval for this epoch ==========
-                    policy = self.model
-                    if cfg.training.use_ema:
-                        policy = self.ema_model
-                    policy.eval()
+                    self.policy.eval()
 
                     # run rollout
                     if (self.epoch % cfg.training.rollout_every) == 0:
-                        runner_log = env_runner.run(policy)
+                        runner_log = env_runner.run(self.policy)
                         # log all
                         step_log.update(runner_log)
 
@@ -399,10 +357,10 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                             get_obs_2 = batch["obs_2"]
                             get_action_2 = batch["action_2"]
                             
-                            start_idx = np.random.randint(0, gt_action.shape[1] - self.model.horizon + 1)
-                            end_idx = start_idx + self.model.horizon
-                            start_idx_2 = np.random.randint(0, get_action_2.shape[1] - self.model.horizon + 1)
-                            end_idx_2 = start_idx_2 + self.model.horizon
+                            start_idx = np.random.randint(0, gt_action.shape[1] - self.policy.horizon + 1)
+                            end_idx = start_idx + self.policy.horizon
+                            start_idx_2 = np.random.randint(0, get_action_2.shape[1] - self.policy.horizon + 1)
+                            end_idx_2 = start_idx_2 + self.policy.horizon
 
                             get_obs = get_obs[:, start_idx:end_idx, :]
                             get_obs_2 = get_obs_2[:, start_idx_2:end_idx_2, :]
@@ -411,8 +369,8 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                             obs_dict = {'obs': get_obs}
                             obs_dict_2 = {'obs': get_obs_2}
 
-                            result = policy.predict_action(obs_dict)
-                            result_2 = policy.predict_action(obs_dict_2)
+                            result = self.policy.predict_action(obs_dict)
+                            result_2 = self.policy.predict_action(obs_dict_2)
                             if cfg.pred_action_steps_only:
                                 pred_action = result['action']
                                 pred_action_2 = result_2['action']
@@ -446,13 +404,12 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                         # We can't copy the last checkpoint here
                         # since save_checkpoint uses threads.
                         # therefore at this point the file might have been empty!
-                        
                         topk_ckpt_path = topk_manager.get_ckpt_path(metric_dict)
 
                         if topk_ckpt_path is not None:
                             self.save_checkpoint(path=topk_ckpt_path)
                     # ========= eval end for this epoch ==========
-                    policy.train()
+                    self.policy.train()
 
                     # end of epoch
                     # log of last step is combined with validation and rollout
@@ -461,19 +418,12 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                     self.global_step += 1
                     self.epoch += 1
 
-        time.sleep(1)
-        stage4_time = datetime.now()
-        logger.info(f"Training complete: {(stage4_time - stage3_time).total_seconds():.2f} seconds")
-
-        end_time = datetime.now()
-        logger.info(f"Total time spent: {(end_time - start_time).total_seconds():.2f} 秒")
-
 @hydra.main(
     version_base=None,
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")), 
     config_name=pathlib.Path(__file__).stem)
 def main(cfg):
-    workspace = PbrlDiffusionTransformerLowdimWorkspace(cfg)
+    workspace = PbrlBETLowdimWorkspace(cfg)
     workspace.run()
 
 if __name__ == "__main__":
