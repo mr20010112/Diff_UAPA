@@ -4,7 +4,7 @@ obs_dim: 17
 action_dim: 6
 keypoint_dim: 3
 
-dataset_path: &dataset_path data/d4rl/halfcheetah-medium-expert-v2.pkl
+dataset_path: &dataset_path data/d4rl/expert/halfcheetah-medium-expert-v2.pkl
 
 env_runner:
   _target_: diffusion_policy.env_runner.d4rl_lowdim_runner.D4rlEnvRunner

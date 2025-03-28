@@ -1,14 +1,14 @@
-name: hopper
+name: halfcheetah
 
-obs_dim: 11
-action_dim: 3
+obs_dim: 17
+action_dim: 6
 keypoint_dim: 3
 
-dataset_path: &dataset_path data/d4rl/hopper-medium-expert-v2.pkl
+dataset_path: &dataset_path data/d4rl/replay/halfcheetah-medium-replay-v2.pkl
 
 env_runner:
   _target_: diffusion_policy.env_runner.d4rl_lowdim_runner.D4rlEnvRunner
-  env_name: 'hopper-medium-v0'
+  env_name: 'halfcheetah-medium-v0'
   n_train: 6
   n_test: 50
   test_start_seed: 100000

@@ -217,9 +217,12 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         votes_2 = torch.where(condition_2, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device))
         votes_2 = torch.squeeze(votes_2, dim=-1).detach()
 
-        # chaos labels
-        
+        mask = condition_2.squeeze(-1)
 
+        actions_1[mask], actions_2[mask] = actions_2[mask], actions_1[mask]
+        observations_1[mask], observations_2[mask] = observations_2[mask], observations_1[mask]
+        length_1[mask], length_2[mask] = length_2[mask], length_1[mask]
+        
         batch_1 = {
             'obs': torch.tensor(observations_1, device=self.device),
             'action': torch.tensor(actions_1, device=self.device),
@@ -334,6 +337,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             mle_loss_2 = -F.logsigmoid(traj_loss_2 - traj_loss_1 + immitation_loss)
 
 
-            loss += (votes_1.to(self.device) * mle_loss_1 + votes_2.to(self.device) * mle_loss_2) / (2 * self.train_time_samples[0]) 
+            loss += mle_loss_1 / (2 * self.train_time_samples[0]) 
 
         return torch.mean(loss)

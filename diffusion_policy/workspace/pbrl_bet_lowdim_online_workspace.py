@@ -94,7 +94,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         device = torch.device(cfg.training.device_gpu)
         ref_policy = copy.deepcopy(self.policy)
         # ref_policy.double()
-        ref_policy.eval() 
+        ref_policy.train() #.eval() 
         for param in ref_policy.parameters():
             param.requires_grad = False
         ref_policy.to(device)
@@ -121,20 +121,20 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         #         normalizer['action'].normalize(
         #             dataset.get_all_actions()))
 
-        # configure dataset
-        dataset_1: BaseLowdimDataset
-        dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
-        assert isinstance(dataset_1, BaseLowdimDataset)
+        # # configure dataset
+        # dataset_1: BaseLowdimDataset
+        # dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
+        # assert isinstance(dataset_1, BaseLowdimDataset)
 
 
-        # configure dataset
-        dataset_2: BaseLowdimDataset
-        dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
-        assert isinstance(dataset_2, BaseLowdimDataset)
+        # # configure dataset
+        # dataset_2: BaseLowdimDataset
+        # dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
+        # assert isinstance(dataset_2, BaseLowdimDataset)
 
         pref_dataset: BaseLowdimDataset
-        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset_1.replay_buffer, \
-                                               replay_buffer_2=dataset_2.replay_buffer) #cfg.task.perf_dataset
+        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset.replay_buffer, \
+                                               replay_buffer_2=dataset.replay_buffer) #cfg.task.perf_dataset
 
         # cut online groups
         votes_1, votes_2 = pref_dataset.pref_replay_buffer.meta['votes'], pref_dataset.pref_replay_buffer.meta['votes_2']
@@ -241,6 +241,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         # device transfer
         device = torch.device(cfg.training.device_gpu)
         self.policy.to(device)
+        self.policy.train()
         optimizer_to(self.optimizer, device)
         
         # save batch for sampling
@@ -310,7 +311,8 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
 
                             # compute loss
                             # torch.autograd.set_detect_anomaly(True)
-                            raw_loss = self.policy.compute_loss(batch, ref_policy=ref_policy)
+                            stride = self.policy.n_obs_steps
+                            raw_loss = self.policy.compute_loss(batch, ref_policy=ref_policy, stride=stride)
                             loss = raw_loss / cfg.training.gradient_accumulate_every
                             loss.backward()
 
