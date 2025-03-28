@@ -193,7 +193,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
 
     def compute_loss(self, batch, ref_model: TransformerForDiffusion, avg_traj_loss=0.0, stride=1):
 
-        ref_model.eval()
         for param in ref_model.parameters():
             param.requires_grad = False
 

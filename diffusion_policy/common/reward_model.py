@@ -235,16 +235,24 @@ class RewardModel(object):
         act_2 = batch['actions_2']
         labels = batch['labels']  # batch_size * 2 (one-hot)
 
-        # 转换为 PyTorch 张量
+        # 转换为 PyTorch 张量，并确保 labels 是二维的
         obs_1 = reward_utils.to_torch(obs_1).to(self.device)
         act_1 = reward_utils.to_torch(act_1).to(self.device)
         obs_2 = reward_utils.to_torch(obs_2).to(self.device)
         act_2 = reward_utils.to_torch(act_2).to(self.device)
         labels = reward_utils.to_torch(labels, dtype=torch.float32).to(self.device)  # batch_size * 2
 
+        # 确保 labels 是二维张量 (batch_size, 2)
+        if labels.dim() == 1:  # 如果是一维，增加一个维度
+            labels = labels.unsqueeze(0)
+        elif labels.dim() > 2:  # 如果维度过高，展平为二维
+            labels = labels.view(-1, 2)
+
         # 获取可比较的标签
-        comparable_indices = np.where((labels != [0.5, 0.5]).any(axis=1))[0]
-        comparable_labels = torch.argmax(labels, dim=1).to(self.device)  # batch_size
+        # 使用 torch.all 来检查是否等于 [0.5, 0.5]
+        mask = ~torch.all(labels == torch.tensor([0.5, 0.5], device=self.device), dim=1)  # batch_size
+        comparable_indices = torch.where(mask)[0]  # 可比较的样本索引
+        comparable_labels = torch.argmax(labels, dim=1)  # batch_size
 
         # 获取奖励预测
         r_hat1 = self.ensemble[member](obs_1, act_1)  # batch_size * len_query
@@ -287,6 +295,7 @@ class RewardModel(object):
             correct = (predicted[comparable_indices] == comparable_labels[comparable_indices]).sum().item() / len(comparable_indices)
 
         return curr_loss, correct
+    
 
     def r_hat_member(self, x, member):
         return self.ensemble[member](torch.from_numpy(x).float().to(self.device))
@@ -417,16 +426,24 @@ class TransformerRewardModel(RewardModel):
         act_2 = batch['actions_2']
         labels = batch['labels']  # batch_size * 2 (one-hot)
 
-        # 转换为 PyTorch 张量
+        # 转换为 PyTorch 张量，并确保 labels 是二维的
         obs_1 = reward_utils.to_torch(obs_1).to(self.device)
         act_1 = reward_utils.to_torch(act_1).to(self.device)
         obs_2 = reward_utils.to_torch(obs_2).to(self.device)
         act_2 = reward_utils.to_torch(act_2).to(self.device)
         labels = reward_utils.to_torch(labels, dtype=torch.float32).to(self.device)  # batch_size * 2
 
+        # 确保 labels 是二维张量 (batch_size, 2)
+        if labels.dim() == 1:  # 如果是一维，增加一个维度
+            labels = labels.unsqueeze(0)
+        elif labels.dim() > 2:  # 如果维度过高，展平为二维
+            labels = labels.view(-1, 2)
+
         # 获取可比较的标签
-        comparable_indices = np.where((labels != [0.5, 0.5]).any(axis=1))[0]
-        comparable_labels = torch.argmax(labels, dim=1).to(self.device)  # batch_size
+        # 使用 torch.all 来检查是否等于 [0.5, 0.5]
+        mask = ~torch.all(labels == torch.tensor([0.5, 0.5], device=self.device), dim=1)  # batch_size
+        comparable_indices = torch.where(mask)[0]  # 可比较的样本索引
+        comparable_labels = torch.argmax(labels, dim=1)  # batch_size
 
         # 获取奖励预测
         r_hat1 = self.ensemble[member](obs_1, act_1)  # batch_size * len_query
@@ -441,7 +458,7 @@ class TransformerRewardModel(RewardModel):
         # 步骤 1：固定奖励模型参数，更新 δ
         with torch.no_grad():
             delta_r = r_hat1 - r_hat2  # batch_size * 1
-            delta_update = torch.log(1.0 / lambda_reg - 1.0) - delta_r  # R³M 闭式解
+            delta_update = torch.log(torch.tensor(1.0 / lambda_reg - 1.0, device=self.device)) - delta_r  # R³M 闭式解
             delta = torch.max(delta_update, torch.zeros_like(delta))  # 确保 δ >= 0
 
         # 步骤 2：固定 δ，计算损失并准备更新奖励模型参数
