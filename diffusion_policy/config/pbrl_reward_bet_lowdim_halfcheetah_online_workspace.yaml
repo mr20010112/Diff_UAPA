@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - task: halfcheetah
+  - task: halfcheetah_expert
 
 name: train_bet_lowdim
 _target_: diffusion_policy.workspace.pbrl_reward_bet_lowdim_online_workspace.PbrlBETLowdimWorkspace
@@ -69,11 +69,17 @@ reward_model:
     d_model: 256
     num_layers: 2
     max_seq_len: 100
-    lr: 0.0003
     activation: "tanh"
     device: ${training.device_gpu}
     logger: None
     task: 'halfcheetah'
+
+reward_training:
+  lr: 5.0e-4
+  batch_size: 60
+  n_epochs: 150
+  warm_up_epochs: 10
+  data_size: ${task.pref_dataset.N}
 
 dataloader:
   batch_size: 200

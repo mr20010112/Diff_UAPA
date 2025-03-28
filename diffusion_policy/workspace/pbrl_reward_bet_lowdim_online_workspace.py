@@ -28,6 +28,7 @@ from diffusion_policy.policy.bet_lowdim_policy import BETLowdimPolicy
 from diffusion_policy.dataset.base_dataset import BaseLowdimDataset
 from diffusion_policy.env_runner.base_lowdim_runner import BaseLowdimRunner
 from diffusion_policy.common.checkpoint_util import TopKCheckpointManager
+from diffusion_policy.common.reward_model import RewardModel
 from diffusion_policy.model.common.normalizer import (
     LinearNormalizer, 
     SingleFieldLinearNormalizer
@@ -50,6 +51,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         np.random.seed(seed)
         random.seed(seed)
 
+        self.reward_model: RewardModel
         self.reward_model = hydra.utils.instantiate(cfg.reward_model)
 
         # configure model
@@ -228,7 +230,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         device = torch.device(cfg.training.device_gpu)
         self.policy.to(device)
         optimizer_to(self.optimizer, device)
-        self.reward_model.to(device)
+        # self.reward_model.to(device) #debug
 
         # save batch for sampling
         train_sampling_batch = None
@@ -280,21 +282,19 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                 condition_1 = (votes_1 > votes_2) & (diff >= threshold)  # votes_1 > votes_2 and diff >= threshold
                 condition_2 = (votes_1 < votes_2) & (diff >= threshold)  # votes_1 < votes_2 and diff >= threshold
 
-                votes_1 = np.where(condition_1, 1.0, 0.0)
-                votes_1 = np.squeeze(votes_1, axis=-1)  # NumPy uses axis instead of dim
+                votes_1 = np.where(condition_1, 1.0, 0.0)# NumPy uses axis instead of dim
                 votes_2 = np.where(condition_2, 1.0, 0.0)
-                votes_2 = np.squeeze(votes_2, axis=-1)
 
                 labels = np.concatenate([votes_1, votes_2], axis=1)
                 
                 pref_data = {
-                    'observations': pref_dataset.pref_replay_buffer['obs'],
-                    'actions': pref_dataset.pref_replay_buffer['action'],
-                    'observations_2': pref_dataset.pref_replay_buffer['obs_2'],
-                    'actions_2': pref_dataset.pref_replay_buffer['action_2'],
-                    'labels': labels  # 假设 votes 是偏好标签
+                    'observations': pref_dataset.pref_replay_buffer.data['obs'],
+                    'actions': pref_dataset.pref_replay_buffer.data['action'],
+                    'observations_2': pref_dataset.pref_replay_buffer.data['obs_2'],
+                    'actions_2': pref_dataset.pref_replay_buffer.data['action_2'],
+                    'labels': labels 
                 }
-                self.reward_model.train(pref_data, n_epochs=cfg.training.reward_epochs, batch_size=cfg.dataloader.batch_size)
+                self.reward_model.r3m_train(pref_dataset=pref_data, **cfg.reward_training)
 
                 train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
                 for local_epoch_idx in range(cfg.training.num_epochs):

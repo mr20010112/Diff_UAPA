@@ -1,9 +1,9 @@
 defaults:
   - _self_
-  - task: hopper #kitchen_lowdim_abs
+  - task: hopper_replay #kitchen_lowdim_abs
 
 name: train_diffusion_transformer_lowdim
-_target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type2_workspace.PbrlDiffusionTransformerLowdimWorkspace #_type1_, _type2_
+_target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type1_workspace.PbrlDiffusionTransformerLowdimWorkspace #_type1_, _type2_
 checkpoint_dir: 'data/experiments/low_dim/d4rl/hopper/diff/base/epoch=0475-test_cumulative_rewards=1148.149.ckpt'
 
 obs_dim: ${task.obs_dim}
@@ -94,7 +94,7 @@ val_dataloader:
   persistent_workers: False
 
 optimizer:
-  learning_rate: 1.0e-3
+  learning_rate: 2.0e-5
   weight_decay: 1.0e-3
   betas: [0.9, 0.95]
 
@@ -108,7 +108,7 @@ training:
   lr_scheduler: cosine
   # Transformer needs LR warmup
   lr_warmup_steps: 0
-  num_epochs: 30
+  num_epochs: 50
   # lr_end: 1.0e-8
   # power: 1.5
   grad_norm_clip: 0.5
@@ -116,8 +116,8 @@ training:
   use_ema: True
   # training loop control
   # in epochs
-  rollout_every: 10
-  checkpoint_every: 10
+  rollout_every: 20
+  checkpoint_every: 20
   val_every: 1
   sample_every: 5
   # steps per epoch

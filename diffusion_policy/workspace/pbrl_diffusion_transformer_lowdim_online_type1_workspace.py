@@ -213,7 +213,7 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
 
             pref_dataset.set_beta_priori(data_size=100)
-            pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=25, warm_up_epochs=2, batch_size=20, lr=2.0e-5)
+            pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=50, warm_up_epochs=2, batch_size=20, lr=2.0e-5)
             pref_dataset.update_beta_priori(batch_size=1)
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)

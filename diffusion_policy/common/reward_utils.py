@@ -186,7 +186,7 @@ class PrefTransformer1(nn.Module):
             nn.LayerNorm(d_model)
         )
         
-        self.causual_transformer = nn.TransformerEncoder(
+        self.causal_transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model, nhead, d_model * 4, batch_first=True), 
             num_layers
         )
@@ -200,8 +200,10 @@ class PrefTransformer1(nn.Module):
         if self.mask.device != obs.device: self.mask = self.mask.to(obs.device)
         batch_size, traj_len = obs.shape[:2]
         
-        pos = self.pos_emb(
-            torch.arange(traj_len, device=obs.device))[None,]
+        # Generate a new mask for the current sequence length
+        mask = nn.Transformer.generate_square_subsequent_mask(2*traj_len).to(obs.device)
+        
+        pos = self.pos_emb(torch.arange(traj_len, device=obs.device))[None,]
         obs = self.obs_emb(obs) + pos
         act = self.act_emb(act) + pos
         
@@ -209,7 +211,7 @@ class PrefTransformer1(nn.Module):
         x[:, 0::2] = obs
         x[:, 1::2] = act
 
-        x = self.causual_transformer(x, self.mask[:2*traj_len,:2*traj_len])[:, 1::2]
+        x = self.causal_transformer(x, mask)[:, 1::2]
         # x: (batch_size, traj_len, d_model)
 
         q = self.q_proj(x) # (batch_size, traj_len, d_model)

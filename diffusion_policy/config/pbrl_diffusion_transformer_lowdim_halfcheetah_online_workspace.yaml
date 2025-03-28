@@ -1,9 +1,9 @@
 defaults:
   - _self_
-  - task: halfcheetah #kitchen_lowdim_abs
+  - task: halfcheetah_replay #kitchen_lowdim_abs
 
 name: train_diffusion_transformer_lowdim
-_target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type2_workspace.PbrlDiffusionTransformerLowdimWorkspace #_type1_, _type2_
+_target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type1_workspace.PbrlDiffusionTransformerLowdimWorkspace #_type1_, _type2_
 checkpoint_dir: 'data/experiments/low_dim/d4rl/halfcheetah/diff/base/epoch=0520-test_cumulative_rewards=2877.568.ckpt'
 
 obs_dim: ${task.obs_dim}
@@ -22,7 +22,7 @@ obs_as_cond: True
 pred_action_steps_only: False
 
 policy: 
-  _target_: diffusion_policy.policy.cpl_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_
+  _target_: diffusion_policy.policy.ours_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_
 
   model: 
     _target_: diffusion_policy.model.diffusion.transformer_for_diffusion.TransformerForDiffusion
@@ -54,7 +54,7 @@ policy:
     prediction_type: epsilon # or sample
 
   gamma: ${gamma}
-  beta: 1.25e-5 #dpo:2.8e-6; cpl:2e-6; ours:5.0e-5
+  beta: 1.0e-4 #dpo:4e-6; cpl:2e-6; ours:1.0e-4
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
   bias_reg: 0.25
@@ -74,8 +74,8 @@ policy:
 ema:
   _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
   update_after_step: 0
-  inv_gamma: 1.0 #1.0
-  power: 0.75 #0.75
+  inv_gamma: 1.0
+  power: 0.75
   min_value: 0.0
   max_value: 0.9999
 
@@ -94,7 +94,7 @@ val_dataloader:
   persistent_workers: False
 
 optimizer:
-  learning_rate: 1.0e-3
+  learning_rate: 2.0e-5
   weight_decay: 1.0e-3
   betas: [0.9, 0.95]
 
@@ -116,8 +116,8 @@ training:
   use_ema: True
   # training loop control
   # in epochs
-  rollout_every: 10
-  checkpoint_every: 10
+  rollout_every: 20
+  checkpoint_every: 20
   val_every: 1
   sample_every: 5
   # steps per epoch
