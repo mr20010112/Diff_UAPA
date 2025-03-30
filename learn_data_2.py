@@ -2,7 +2,7 @@ import pickle
 import numpy as np
 
 # 加载 pkl 文件
-file_path = 'data/d4rl/halfcheetah-medium-expert-v2.pkl'
+file_path = 'data/d4rl/expert/halfcheetah-medium-expert-v2.pkl'
 with open(file_path, 'rb') as f:
     data = pickle.load(f)
 

@@ -257,7 +257,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             timesteps_1 = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=self.device).long()
             timesteps_2 = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=self.device).long()
 
-            traj_loss_1, traj_loss_2, avg_traj_loss = 0, 0, save_avg_traj_loss
+            traj_loss_1, traj_loss_2, avg_traj_loss = 0, 0, save_avg_traj_loss.detach()
             immitation_loss = 0
 
             for i in range(len(obs_1)):
@@ -355,8 +355,8 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             diff_map_loss_1 = torch.mean(torch.abs(traj_loss_1 - avg_traj_loss))
             diff_map_loss_2 = torch.mean(torch.abs(traj_loss_2 - avg_traj_loss))
 
-            mle_loss_1 = -F.logsigmoid((traj_loss_1 - self.bias_reg*traj_loss_2)) + immitation_loss*(1+2*self.map_ratio)
-            mle_loss_2 = -F.logsigmoid((traj_loss_2 - self.bias_reg*traj_loss_1)) + immitation_loss*(1+2*self.map_ratio)
+            mle_loss_1 = -F.logsigmoid((traj_loss_1 - self.bias_reg*traj_loss_2)) #+ immitation_loss*(1+2*self.map_ratio)
+            mle_loss_2 = -F.logsigmoid((traj_loss_2 - self.bias_reg*traj_loss_1)) #+ immitation_loss*(1+2*self.map_ratio)
 
 
             loss += mle_loss_1 / (2 * self.train_time_samples[0]) 

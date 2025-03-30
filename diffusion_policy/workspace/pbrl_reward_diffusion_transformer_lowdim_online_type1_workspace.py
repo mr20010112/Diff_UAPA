@@ -268,28 +268,28 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             cfg.training.val_every = 1
             cfg.training.sample_every = 1
 
-            print("Training reward model...")
-            votes_1 = pref_dataset.pref_replay_buffer.meta['votes']
-            votes_2 = pref_dataset.pref_replay_buffer.meta['votes_2']
+        print("Training reward model...")
+        votes_1 = pref_dataset.pref_replay_buffer.meta['votes']
+        votes_2 = pref_dataset.pref_replay_buffer.meta['votes_2']
 
-            threshold = 1e-2
-            diff = np.abs(votes_1 - votes_2)
-            condition_1 = (votes_1 > votes_2) & (diff >= threshold)  # votes_1 > votes_2 and diff >= threshold
-            condition_2 = (votes_1 < votes_2) & (diff >= threshold)  # votes_1 < votes_2 and diff >= threshold
+        threshold = 1e-2
+        diff = np.abs(votes_1 - votes_2)
+        condition_1 = (votes_1 > votes_2) & (diff >= threshold)  # votes_1 > votes_2 and diff >= threshold
+        condition_2 = (votes_1 < votes_2) & (diff >= threshold)  # votes_1 < votes_2 and diff >= threshold
 
-            votes_1 = np.where(condition_1, 1.0, 0.0)# NumPy uses axis instead of dim
-            votes_2 = np.where(condition_2, 1.0, 0.0)
+        votes_1 = np.where(condition_1, 1.0, 0.0)# NumPy uses axis instead of dim
+        votes_2 = np.where(condition_2, 1.0, 0.0)
 
-            labels = np.concatenate([votes_1, votes_2], axis=1)
-            
-            pref_data = {
-                'observations': pref_dataset.pref_replay_buffer.data['obs'],
-                'actions': pref_dataset.pref_replay_buffer.data['action'],
-                'observations_2': pref_dataset.pref_replay_buffer.data['obs_2'],
-                'actions_2': pref_dataset.pref_replay_buffer.data['action_2'],
-                'labels': labels 
-            }
-            self.reward_model.r3m_train(pref_dataset=pref_data, **cfg.reward_training)
+        labels = np.concatenate([votes_1, votes_2], axis=1)
+        
+        pref_data = {
+            'observations': pref_dataset.pref_replay_buffer.data['obs'],
+            'actions': pref_dataset.pref_replay_buffer.data['action'],
+            'observations_2': pref_dataset.pref_replay_buffer.data['obs_2'],
+            'actions_2': pref_dataset.pref_replay_buffer.data['action_2'],
+            'labels': labels 
+        }
+        self.reward_model.r3m_train(pref_dataset=pref_data, **cfg.reward_training)
 
         time.sleep(0.5)
         stage3_time = datetime.now()
@@ -317,7 +317,7 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 )
 
 
-                with torch.no_grad():  # 禁用梯度计算
+                with torch.no_grad():
                     reward_1 = torch.mean(torch.stack([
                         self.reward_model.ensemble[i](
                             torch.tensor(pref_dataset.pref_replay_buffer.data['obs'], device=device, dtype=torch.float32),
@@ -340,13 +340,14 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                         return 1 / (1 + np.exp(-x))
 
                     reward_diff_np = reward_diff.detach().cpu().numpy()
-                    condiction = sigmoid(reward_diff_np)
+                    tau = np.random.uniform(1, 3, size=1)[0]
+                    condiction = sigmoid(reward_diff_np / tau)
 
                     random_values = np.random.rand(condiction.shape[0])
 
                     labels = np.zeros((condiction.shape[0], 2))
 
-                    close_mask = np.abs(reward_diff_np) < 1e-4
+                    close_mask = np.abs(reward_diff_np) < 1e-3
                     prefer_1_mask = (condiction > random_values) & ~close_mask
                     prefer_2_mask = (condiction <= random_values) & ~close_mask
 

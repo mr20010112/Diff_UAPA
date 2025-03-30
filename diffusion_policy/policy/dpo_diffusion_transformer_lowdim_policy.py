@@ -204,7 +204,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         actions_2 = batch["action_2"].to(self.device)
         votes_2 = batch["votes_2"].to(self.device)
         length_2 = batch["length_2"].to(self.device).detach()
-        save_avg_traj_loss = torch.tensor(avg_traj_loss, device=self.device).detach()
 
         threshold = 1e-2
         diff = torch.abs(votes_1 - votes_2)
@@ -254,7 +253,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             timesteps_1 = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=self.device).long()
             timesteps_2 = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=self.device).long()
 
-            traj_loss_1, traj_loss_2, immitation_loss, avg_traj_loss = 0, 0, 0, save_avg_traj_loss
+            traj_loss_1, traj_loss_2, immitation_loss, avg_traj_loss = 0, 0, 0, 0
 
             for i in range(len(obs_1)):
                 obs_1_slide = obs_1[i]
@@ -327,8 +326,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
 
             traj_loss_1 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_1
             traj_loss_2 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_2
-            avg_traj_loss = -self.beta * self.noise_scheduler.config.num_train_timesteps * avg_traj_loss
-            immitation_loss = -torch.mean(immitation_loss) / (self.horizon * (len(obs_1)+len(obs_2)) * 4)
+            # immitation_loss = -torch.mean(immitation_loss) / (self.horizon * (len(obs_1)+len(obs_2)))
 
             diff_loss = torch.mean(torch.abs(traj_loss_1 - traj_loss_2))
 
@@ -336,6 +334,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             mle_loss_2 = -F.logsigmoid(traj_loss_2 - traj_loss_1 + immitation_loss)
 
 
-            loss += mle_loss_1 / (2 * self.train_time_samples[0]) 
+            loss += immitation_loss #mle_loss_1 / (2 * self.train_time_samples[0]) 
 
         return torch.mean(loss)

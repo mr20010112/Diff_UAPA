@@ -211,10 +211,11 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2.reshape(-1, 1)
             pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
             pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
-
-            pref_dataset.set_beta_priori(data_size=100)
-            pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=50, warm_up_epochs=2, batch_size=20, lr=2.0e-5)
-            pref_dataset.update_beta_priori(batch_size=1)
+            
+            with torch.no_grad():
+                pref_dataset.set_beta_priori(data_size=100)
+                pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=50, warm_up_epochs=2, batch_size=20, lr=2.0e-5)
+                pref_dataset.update_beta_priori(batch_size=1)
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset
@@ -336,7 +337,7 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
                             # compute loss
                             avg_traj_loss = 0.0
-                            stride = int(np.round(self.model.horizon * 0.5))
+                            stride = self.model.n_obs_steps #int(np.round(self.model.horizon * 0.5))
                             if cfg.training.map.use_map:
                                 avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
                                                                       model = self.model, ref_model = ref_policy.model, stride=stride)

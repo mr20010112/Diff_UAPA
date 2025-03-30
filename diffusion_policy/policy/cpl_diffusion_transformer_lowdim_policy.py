@@ -340,8 +340,8 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             diff_loss_1 = torch.mean(torch.abs(traj_loss_1 - self.bias_reg*traj_loss_2))
             mean_immitation_loss = torch.mean(immitation_loss)*0.5
 
-            mle_loss_1 = -F.logsigmoid(traj_loss_1 - self.bias_reg*traj_loss_2) + immitation_loss/(4*(len(obs_1) + len(obs_2))*self.horizon)
-            mle_loss_2 = -F.logsigmoid(traj_loss_2 - self.bias_reg*traj_loss_1) + immitation_loss/(4*(len(obs_1) + len(obs_2))*self.horizon)
+            mle_loss_1 = -F.logsigmoid(traj_loss_1 - self.bias_reg*traj_loss_2) #+ immitation_loss/((len(obs_1) + len(obs_2))*self.horizon)
+            mle_loss_2 = -F.logsigmoid(traj_loss_2 - self.bias_reg*traj_loss_1) #+ immitation_loss/((len(obs_1) + len(obs_2))*self.horizon)
 
 
             loss += mle_loss_1 / (2 * self.train_time_samples) 

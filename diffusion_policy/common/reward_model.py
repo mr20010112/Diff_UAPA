@@ -86,7 +86,7 @@ class RewardModel(object):
         main_steps = total_steps - warm_up_steps
 
         self.lr = lr
-        self.opt = torch.optim.Adam(self.paramlst, lr=self.lr, weight_decay=0)
+        self.opt = torch.optim.Adam(self.paramlst, lr=self.lr, weight_decay=1.0e-5)
         warm_up_scheduler = LinearLR(self.opt, start_factor=1e-8, end_factor=1.0, total_iters=warm_up_steps)
         cosine_scheduler = CosineAnnealingLR(self.opt, T_max=main_steps)
         self.scheduler = SequentialLR(self.opt, schedulers=[warm_up_scheduler, cosine_scheduler], milestones=[warm_up_steps])

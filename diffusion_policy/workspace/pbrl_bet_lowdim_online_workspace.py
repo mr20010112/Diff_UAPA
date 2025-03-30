@@ -311,7 +311,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
 
                             # compute loss
                             # torch.autograd.set_detect_anomaly(True)
-                            stride = self.policy.n_obs_steps
+                            stride = self.policy.n_obs_steps*2
                             raw_loss = self.policy.compute_loss(batch, ref_policy=ref_policy, stride=stride)
                             loss = raw_loss / cfg.training.gradient_accumulate_every
                             loss.backward()
