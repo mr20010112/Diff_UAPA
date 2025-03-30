@@ -3,7 +3,7 @@ defaults:
   - task: halfcheetah_replay #kitchen_lowdim_abs
 
 name: train_diffusion_transformer_lowdim
-_target_: diffusion_policy.workspace.pbrl_reward_diffusion_transformer_lowdim_online_type1_workspace.PbrlDiffusionTransformerLowdimWorkspace #_type1_, _type2_
+_target_: diffusion_policy.workspace.pbrl_reward_diffusion_transformer_lowdim_online_type2_workspace.PbrlDiffusionTransformerLowdimWorkspace #_type1_, _type2_
 checkpoint_dir: 'data/experiments/low_dim/d4rl/halfcheetah/diff/base/epoch=0520-test_cumulative_rewards=2877.568.ckpt'
 
 obs_dim: ${task.obs_dim}
@@ -101,21 +101,21 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 60
+  batch_size: 55
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 60
+  batch_size: 55
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 optimizer:
-  learning_rate: 1.0e-6
+  learning_rate: 2.0e-5
   weight_decay: 1.0e-3
   betas: [0.9, 0.95]
 
@@ -154,7 +154,7 @@ training:
     reverse_freq: 1
     update_history: False
   map:
-    use_map: False #True
+    use_map: True #True
     map_ratio: 0.25
 
 

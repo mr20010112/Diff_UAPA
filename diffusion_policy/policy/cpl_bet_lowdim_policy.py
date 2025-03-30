@@ -288,8 +288,8 @@ class BETLowdimPolicy(BaseLowdimPolicy):
         mean_loss_1 = torch.mean(torch.abs(traj_loss_1 - self.bias_reg *  traj_loss_2))
         immatation_loss = immatation_loss_1 + immatation_loss_2
 
-        mle_loss_1 = -F.logsigmoid(self.beta*(traj_loss_1 - self.bias_reg * traj_loss_2)) + immatation_loss/(400*(len(obs_1) + len(obs_2))*self.horizon)
-        mle_loss_2 = -F.logsigmoid(self.beta*(traj_loss_2 - self.bias_reg * traj_loss_1)) + immatation_loss/(400*(len(obs_1) + len(obs_2))*self.horizon)
+        mle_loss_1 = -F.logsigmoid(self.beta*(traj_loss_1 - self.bias_reg * traj_loss_2)) + immatation_loss/((len(obs_1) + len(obs_2))*self.horizon)
+        mle_loss_2 = -F.logsigmoid(self.beta*(traj_loss_2 - self.bias_reg * traj_loss_1)) + immatation_loss/((len(obs_1) + len(obs_2))*self.horizon)
 
         loss += mle_loss_1
 

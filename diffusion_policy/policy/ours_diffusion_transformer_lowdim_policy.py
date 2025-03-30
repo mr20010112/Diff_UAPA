@@ -202,12 +202,12 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         actions_1 = batch["action"].to(self.device)
         votes_1 = batch["votes"].to(self.device)
         length_1 = batch["length"].to(self.device).detach()
-        beta_priori = batch["beta_priori"].to(self.device)
+        beta_priori = batch["beta_priori"].to(self.device).detach()
         observations_2 = batch["obs_2"].to(self.device)
         actions_2 = batch["action_2"].to(self.device)
         votes_2 = batch["votes_2"].to(self.device)
         length_2 = batch["length_2"].to(self.device).detach()
-        beta_priori_2 = batch["beta_priori_2"].to(self.device)
+        beta_priori_2 = batch["beta_priori_2"].to(self.device).detach()
         save_avg_traj_loss = torch.tensor(avg_traj_loss, device=self.device).detach()
 
         threshold = 1e-2
@@ -355,8 +355,8 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             diff_map_loss_1 = torch.mean(torch.abs(traj_loss_1 - avg_traj_loss))
             diff_map_loss_2 = torch.mean(torch.abs(traj_loss_2 - avg_traj_loss))
 
-            mle_loss_1 = -F.logsigmoid((traj_loss_1 - self.bias_reg*traj_loss_2)) #+ immitation_loss*(1+2*self.map_ratio)
-            mle_loss_2 = -F.logsigmoid((traj_loss_2 - self.bias_reg*traj_loss_1)) #+ immitation_loss*(1+2*self.map_ratio)
+            mle_loss_1 = -F.logsigmoid((traj_loss_1 - self.bias_reg*traj_loss_2)) + immitation_loss*(1+2*self.map_ratio)
+            mle_loss_2 = -F.logsigmoid((traj_loss_2 - self.bias_reg*traj_loss_1)) + immitation_loss*(1+2*self.map_ratio)
 
 
             loss += mle_loss_1 / (2 * self.train_time_samples[0]) 

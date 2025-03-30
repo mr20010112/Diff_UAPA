@@ -4,7 +4,7 @@ defaults:
 
 name: train_diffusion_transformer_lowdim
 _target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type1_workspace.PbrlDiffusionTransformerLowdimWorkspace #_type1_, _type2_
-checkpoint_dir: 'data/experiments/low_dim/d4rl/halfcheetah/diff/base/epoch=0520-test_cumulative_rewards=2877.568.ckpt'
+checkpoint_dir: 'data/outputs/2025.03.29/23.40.56_train_diffusion_transformer_lowdim_halfcheetah/checkpoints/epoch=0260-test_cumulative_rewards=697.308.ckpt' #'data/experiments/low_dim/d4rl/halfcheetah/diff/base/epoch=0520-test_cumulative_rewards=2877.568.ckpt'
 
 obs_dim: ${task.obs_dim}
 action_dim: ${task.action_dim}
@@ -103,7 +103,7 @@ training:
   device_gpu: "cuda:0"
   seed: 42
   debug: False
-  resume: False #True
+  resume: True #True
   # optimization
   lr_scheduler: cosine
   # Transformer needs LR warmup
@@ -116,8 +116,8 @@ training:
   use_ema: True
   # training loop control
   # in epochs
-  rollout_every: 10
-  checkpoint_every: 10
+  rollout_every: 20
+  checkpoint_every: 20
   val_every: 1
   sample_every: 5
   # steps per epoch
