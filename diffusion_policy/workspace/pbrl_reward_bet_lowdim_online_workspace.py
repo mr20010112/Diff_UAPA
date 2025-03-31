@@ -59,7 +59,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         self.policy = hydra.utils.instantiate(cfg.policy)
 
         # configure training state
-        self.optimizer = self.policy.get_optimizer(**cfg.optimizer)
+        self.optimizers = self.policy.get_optimizers(**cfg.optimizer)
 
         self.global_step = 0
         self.epoch = 0
@@ -75,7 +75,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
             if lastest_ckpt_path.is_file():
                 print(f"Resuming from checkpoint {lastest_ckpt_path}")
                 self.load_checkpoint(path=lastest_ckpt_path)
-            self.optimizer = self.policy.get_optimizer(**cfg.optimizer)
+            self.optimizers = self.policy.get_optimizers(**cfg.optimizer)
             self.global_step = 0
             self.epoch = 0
 
@@ -102,12 +102,12 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
             normalizer['action'] = SingleFieldLinearNormalizer.create_identity()
             normalizer['obs'] = SingleFieldLinearNormalizer.create_identity()
 
-        # self.policy.set_normalizer(normalizer)
+        self.policy.set_normalizer(normalizer)
 
-        # # fit action_ae (K-Means)
-        # self.policy.fit_action_ae(
-        #         normalizer['action'].normalize(
-        #             dataset.get_all_actions()))
+        # fit action_ae (K-Means)
+        self.policy.fit_action_ae(
+                normalizer['action'].normalize(
+                    dataset.get_all_actions()))
 
         # # configure dataset
         # dataset_1: BaseLowdimDataset
@@ -189,17 +189,19 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         del dataset
 
         # configure lr scheduler
-        lr_scheduler = get_scheduler(
-            cfg.training.lr_scheduler,
-            optimizer=self.optimizer,
-            num_warmup_steps=cfg.training.lr_warmup_steps,
-            num_training_steps=(
-                len(train_dataloader) * cfg.training.num_epochs) \
+        lr_schedulers = {
+            key: get_scheduler(
+                cfg.training.lr_scheduler,
+                optimizer=self.optimizers[key],
+                num_warmup_steps=cfg.training.lr_warmup_steps,
+                num_training_steps=(len(train_dataloader) * cfg.training.num_epochs) \
                     // cfg.training.gradient_accumulate_every,
-            # pytorch assumes stepping LRScheduler every epoch
-            # however huggingface diffusers steps it every batch
-            last_epoch=self.global_step-1
-        )
+                # pytorch assumes stepping LRScheduler every epoch
+                # however huggingface diffusers steps it every batch
+                last_epoch=-1
+            )
+            for key in self.optimizers.keys()
+        }
 
         # configure env runner
         env_runner: BaseLowdimRunner
@@ -229,7 +231,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         # device transfer
         device = torch.device(cfg.training.device_gpu)
         self.policy.to(device)
-        optimizer_to(self.optimizer, device)
+        [optimizer_to(self.optimizers[key], device) for key in self.optimizers.keys()]
         # self.reward_model.to(device) #debug
 
         # save batch for sampling
@@ -263,15 +265,19 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
 
                 self.optimizer = self.policy.get_optimizer(**cfg.optimizer)
 
-                lr_scheduler = get_scheduler(
-                    cfg.training.lr_scheduler,
-                    optimizer=self.optimizer,
-                    num_warmup_steps=cfg.training.lr_warmup_steps,
-                    num_training_steps=(
-                        len(train_dataloader) * cfg.training.num_epochs) \
+                lr_schedulers = {
+                    key: get_scheduler(
+                        cfg.training.lr_scheduler,
+                        optimizer=self.optimizers[key],
+                        num_warmup_steps=cfg.training.lr_warmup_steps,
+                        num_training_steps=(len(train_dataloader) * cfg.training.num_epochs) \
                             // cfg.training.gradient_accumulate_every,
-                    last_epoch=-1,
-                )
+                        # pytorch assumes stepping LRScheduler every epoch
+                        # however huggingface diffusers steps it every batch
+                        last_epoch=-1
+                    )
+                    for key in self.optimizers.keys()
+                }
 
                 print("Training reward model...")
                 votes_1 = pref_dataset.pref_replay_buffer.meta['votes']
@@ -294,7 +300,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                     'actions_2': pref_dataset.pref_replay_buffer.data['action_2'],
                     'labels': labels 
                 }
-                self.reward_model.r3m_train(pref_dataset=pref_data, **cfg.reward_training)
+                # self.reward_model.train(pref_dataset=pref_data, **cfg.reward_training)
 
                 train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
                 for local_epoch_idx in range(cfg.training.num_epochs):
@@ -311,31 +317,24 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
 
                             # compute loss
                             # torch.autograd.set_detect_anomaly(True)
-                            raw_loss = self.policy.compute_loss(batch, ref_policy=ref_policy)
-                            loss = raw_loss / cfg.training.gradient_accumulate_every
-                            loss.backward()
+                            stride = 2*self.policy.n_obs_steps
+                            raw_loss = self.policy.train_step(batch, self.optimizers, lr_schedulers, self.reward_model, stride=stride)
 
-                            # clip grad norm
-                            torch.nn.utils.clip_grad_norm_(
-                                self.policy.state_prior.parameters(), cfg.training.grad_norm_clip
-                            )
-
-                            # step optimizer
-                            if self.global_step % cfg.training.gradient_accumulate_every == 0:
-                                self.optimizer.step()
-                                self.optimizer.zero_grad(set_to_none=True)
-                                lr_scheduler.step()
+                            # # clip grad norm
+                            # torch.nn.utils.clip_grad_norm_(
+                            #     self.policy.state_prior.parameters(), cfg.training.grad_norm_clip
+                            # )
 
                             # logging
-                            raw_loss_cpu = raw_loss.item()
-                            tepoch.set_postfix(loss=raw_loss_cpu, refresh=False)
-                            train_losses.append(raw_loss_cpu)
                             step_log = {
-                                'train_loss': raw_loss_cpu,
                                 'global_step': self.global_step,
                                 'epoch': self.epoch,
-                                'lr': lr_scheduler.get_last_lr()[0]
                             }
+                            step_log.update(raw_loss)
+                            step_log.update({
+                                f'lr_{key}': lr_schedulers[key].get_last_lr()[0]
+                                for key in lr_schedulers.keys()
+                            })
 
                             is_last_batch = (batch_idx == (len(train_dataloader)*cfg.training.online.num_groups-1))
                             if not is_last_batch:
@@ -347,11 +346,6 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                             if (cfg.training.max_train_steps is not None) \
                                 and batch_idx >= (cfg.training.max_train_steps-1):
                                 break
-
-                    # at the end of each epoch
-                    # replace train_loss with epoch average
-                    train_loss = np.mean(train_losses)
-                    step_log['train_loss'] = train_loss
 
                     # ========= eval for this epoch ==========
                     self.policy.eval()

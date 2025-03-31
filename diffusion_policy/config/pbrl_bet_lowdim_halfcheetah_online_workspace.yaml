@@ -24,7 +24,7 @@ obs_as_global_cond: False
 pred_action_steps_only: False
 
 policy:
-  _target_: diffusion_policy.policy.cpl_bet_lowdim_policy.BETLowdimPolicy #cpl_, dpo_
+  _target_: diffusion_policy.policy.pbrl_bet_lowdim_policy.TD3BCBETLowdinPolicy #cpl_, dpo_
 
   action_ae:
     _target_: diffusion_policy.model.bet.action_ae.discretizers.k_means.KMeansDiscretizer
