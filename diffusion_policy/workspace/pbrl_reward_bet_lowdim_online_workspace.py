@@ -300,7 +300,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                     'actions_2': pref_dataset.pref_replay_buffer.data['action_2'],
                     'labels': labels 
                 }
-                # self.reward_model.train(pref_dataset=pref_data, **cfg.reward_training)
+                self.reward_model.train(pref_dataset=pref_data, **cfg.reward_training)
 
                 train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
                 for local_epoch_idx in range(cfg.training.num_epochs):
