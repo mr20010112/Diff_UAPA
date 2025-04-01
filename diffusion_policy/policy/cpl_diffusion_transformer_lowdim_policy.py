@@ -67,6 +67,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         self.bias_reg = bias_reg
         self.kwargs = kwargs
 
+
         if num_inference_steps is None:
             num_inference_steps = noise_scheduler.config.num_train_timesteps
         self.num_inference_steps = num_inference_steps
@@ -206,6 +207,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         votes_2 = batch["votes_2"].to(self.device)
         length_2 = batch["length_2"].to(self.device).detach()
 
+
         threshold = 1e-2
         diff = torch.abs(votes_1 - votes_2)
         condition_1 = (votes_1 > votes_2) & (diff >= threshold)  # votes_1 > votes_2 and diff >= threshold
@@ -257,6 +259,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             timesteps_2 = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=self.device).long()
 
             traj_loss_1, traj_loss_2 = 0, 0
+            immitation_loss = 0
             # mseloss_1, mseloss_2 = 0, 0
 
             for i in range(len(obs_1)):
@@ -335,13 +338,13 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
 
             traj_loss_1 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_1
             traj_loss_2 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_2
+            avg_traj_loss = -self.beta * self.noise_scheduler.config.num_train_timesteps * avg_traj_loss
 
 
             diff_loss_1 = torch.mean(torch.abs(traj_loss_1 - self.bias_reg*traj_loss_2))
             mean_immitation_loss = torch.mean(immitation_loss)*0.5
 
-            mle_loss_1 = -F.logsigmoid(traj_loss_1 - self.bias_reg*traj_loss_2) #+ immitation_loss/((len(obs_1) + len(obs_2))*self.horizon)
-            mle_loss_2 = -F.logsigmoid(traj_loss_2 - self.bias_reg*traj_loss_1) #+ immitation_loss/((len(obs_1) + len(obs_2))*self.horizon)
+            mle_loss_1 = -F.logsigmoid(traj_loss_1 - self.bias_reg*traj_loss_2) + immitation_loss/((len(obs_1) + len(obs_2))*self.horizon)
 
 
             loss += mle_loss_1 / (2 * self.train_time_samples) 

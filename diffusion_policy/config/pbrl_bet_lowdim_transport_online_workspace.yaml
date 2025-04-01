@@ -63,21 +63,21 @@ policy:
   n_action_steps: ${n_action_steps}
 
 dataloader:
-  batch_size: 60
+  batch_size: 20
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 60
+  batch_size: 20
   num_workers: 1
   shuffle: False
   pin_memory: True
   persistent_workers: False
 
 optimizer:
-  learning_rate: 0.0001 # 1e-4
+  learning_rate: 2.0e-5 # 1e-4
   weight_decay: 0.01
   betas: [0.9, 0.95]
 
@@ -115,7 +115,9 @@ training:
     reverse_rate: 0.5
     reverse_freq: 1
     update_history: False
-
+  map:
+    use_map: True # only true when use our method
+    map_ratio: 0.25
 
 logging:
   project: diffusion_policy_debug

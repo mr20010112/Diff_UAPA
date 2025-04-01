@@ -1,7 +1,7 @@
 import h5py
 
 # 指定 HDF5 文件路径
-file_path = "data/robomimic/datasets/lift/ph/image.hdf5"
+file_path = "data/robomimic/datasets/can/ph/low_dim.hdf5"
 
 # 打开 HDF5 文件
 with h5py.File(file_path, "r") as h5_file:

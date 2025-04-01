@@ -5,6 +5,7 @@ from omegaconf import OmegaConf
 import torch.nn.functional as F
 import einops
 from typing import Optional, Tuple
+from torch.distributions import Beta
 
 from diffusion_policy.model.common.normalizer import LinearNormalizer
 from diffusion_policy.policy.base_lowdim_policy import BaseLowdimPolicy
@@ -41,6 +42,8 @@ class BETLowdimPolicy(BaseLowdimPolicy):
         self.gamma = gamma
         self.beta = beta
         self.bias_reg = bias_reg
+        self.use_map = use_map
+        self.map_ratio = map_ratio
 
     # ========= inference  ============
     def predict_action(self, obs_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
@@ -173,7 +176,7 @@ class BETLowdimPolicy(BaseLowdimPolicy):
 
         return loss
 
-    def compute_loss(self, batch, ref_policy: Optional[BaseLowdimPolicy] = None, stride:Optional[int] = 1 , avg_Traj_loss=0.0) -> torch.Tensor:
+    def compute_loss(self, batch, ref_policy: Optional[BaseLowdimPolicy] = None, stride:Optional[int] = 1 , avg_traj_loss=0.0) -> torch.Tensor:
         # normalize input
         assert 'valid_mask' not in batch
 
@@ -187,7 +190,9 @@ class BETLowdimPolicy(BaseLowdimPolicy):
         actions_2 = batch["action_2"].to(self.device)
         votes_2 = batch["votes_2"].to(self.device)
         length_2 = batch["length_2"].to(self.device).detach()
-
+        beta_priori = batch["beta_priori"].to(self.device).detach()
+        beta_priori_2 = batch["beta_priori_2"].to(self.device).detach()
+        save_avg_traj_loss = torch.tensor(avg_traj_loss, device=self.device).detach()
 
         threshold = 1e-2
         diff = torch.abs(votes_1 - votes_2)
@@ -242,7 +247,7 @@ class BETLowdimPolicy(BaseLowdimPolicy):
 
 
         loss = 0
-        traj_loss_1, traj_loss_2 = 0, 0
+        traj_loss_1, traj_loss_2, avg_traj_loss = 0, 0, save_avg_traj_loss.detach()
         immatation_loss_1, immatation_loss_2 = 0, 0
 
         for i in range(len(obs_1)):
@@ -283,8 +288,8 @@ class BETLowdimPolicy(BaseLowdimPolicy):
             traj_loss_2 = traj_loss_2 - ((loss_2*mask_2)*torch.tensor(self.gamma**(i*self.horizon), device=self.device))
             immatation_loss_2 = immatation_loss_2 + loss_2*mask_2
 
-        traj_loss_1 = torch.sum(traj_loss_1, dim=-1)
-        traj_loss_2 = torch.sum(traj_loss_2, dim=-1)
+        # traj_loss_1 = torch.sum(traj_loss_1, dim=-1)
+        # traj_loss_2 = torch.sum(traj_loss_2, dim=-1)
         mean_loss_1 = torch.mean(torch.abs(traj_loss_1 - self.bias_reg *  traj_loss_2))
         immatation_loss = immatation_loss_1 + immatation_loss_2
 
@@ -292,5 +297,15 @@ class BETLowdimPolicy(BaseLowdimPolicy):
         mle_loss_2 = -F.logsigmoid(self.beta*(traj_loss_2 - self.bias_reg * traj_loss_1)) + immatation_loss/((len(obs_1) + len(obs_2))*self.horizon)
 
         loss += mle_loss_1
+
+        if self.use_map:
+            beta_dist = Beta(beta_priori[:, 0], beta_priori[:, 1])
+            beta_dist_2 = Beta(beta_priori_2[:, 0], beta_priori_2[:, 1])
+
+            map_loss_1 = - beta_dist.log_prob(torch.clamp(torch.sigmoid(traj_loss_1 - avg_traj_loss), min=1e-4, max=1-1e-4))
+
+            map_loss_2 = - beta_dist_2.log_prob(torch.clamp(torch.sigmoid(traj_loss_2 - avg_traj_loss), min=1e-4, max=1-1e-4)) 
+
+            loss += self.map_ratio * (map_loss_1 + map_loss_2)     
 
         return torch.mean(loss)

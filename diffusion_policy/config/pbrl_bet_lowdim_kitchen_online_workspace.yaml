@@ -24,7 +24,7 @@ obs_as_global_cond: False
 pred_action_steps_only: False
 
 policy:
-  _target_: diffusion_policy.policy.dpo_bet_lowdim_policy.BETLowdimPolicy #cpl_, dpo_
+  _target_: diffusion_policy.policy.cpl_bet_lowdim_policy.BETLowdimPolicy #cpl_, dpo_
 
   action_ae:
     _target_: diffusion_policy.model.bet.action_ae.discretizers.k_means.KMeansDiscretizer
@@ -76,7 +76,7 @@ val_dataloader:
   persistent_workers: False
 
 optimizer:
-  learning_rate: 1e-4 # 1e-4
+  learning_rate: 2.0e-5 # 1e-4
   weight_decay: 0.01
   betas: [0.9, 0.95]
 
@@ -89,7 +89,7 @@ training:
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 0
-  num_epochs: 30
+  num_epochs: 50
   gradient_accumulate_every: 1
   grad_norm_clip: 1.0
   enable_normalizer: True
@@ -110,7 +110,7 @@ training:
     num_groups: 4
     all_votes: 100
     reverse_ratio: 0.2
-    reverse_rate: 0.25 #0.25, 0.5, 0.75
+    reverse_rate: 0.5 #0.25, 0.5, 0.75
     reverse_freq: 1
     update_history: False
   map:

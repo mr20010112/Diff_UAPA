@@ -82,7 +82,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         device = torch.device(cfg.training.device_gpu)
         ref_policy = copy.deepcopy(self.policy)
         # ref_policy.double()
-        ref_policy.eval() 
+        ref_policy.train() #.eval() 
         for param in ref_policy.parameters():
             param.requires_grad = False
         ref_policy.to(device)
@@ -106,7 +106,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
 
         # fit action_ae (K-Means)
         self.policy.fit_action_ae(
-                normalizer['action'].normalize(
+                self.policy.normalizer['action'].normalize(
                     dataset.get_all_actions()))
 
         # # configure dataset
@@ -294,10 +294,10 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                 labels = np.concatenate([votes_1, votes_2], axis=1)
                 
                 pref_data = {
-                    'observations': pref_dataset.pref_replay_buffer.data['obs'],
-                    'actions': pref_dataset.pref_replay_buffer.data['action'],
-                    'observations_2': pref_dataset.pref_replay_buffer.data['obs_2'],
-                    'actions_2': pref_dataset.pref_replay_buffer.data['action_2'],
+                    'observations': self.policy.normalizer['obs'].normalize(pref_dataset.pref_replay_buffer.data['obs']).cpu().numpy(),
+                    'actions': self.policy.normalizer['action'].normalize(pref_dataset.pref_replay_buffer.data['action']).cpu().numpy(),
+                    'observations_2':  self.policy.normalizer['obs'].normalize(pref_dataset.pref_replay_buffer.data['obs_2']).cpu().numpy(),
+                    'actions_2': self.policy.normalizer['action'].normalize(pref_dataset.pref_replay_buffer.data['action_2']).cpu().numpy(),
                     'labels': labels 
                 }
                 self.reward_model.train(pref_dataset=pref_data, **cfg.reward_training)
@@ -317,7 +317,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
 
                             # compute loss
                             # torch.autograd.set_detect_anomaly(True)
-                            stride = 2*self.policy.n_obs_steps
+                            stride = self.policy.n_obs_steps
                             raw_loss = self.policy.train_step(batch, self.optimizers, lr_schedulers, self.reward_model, stride=stride)
 
                             # # clip grad norm

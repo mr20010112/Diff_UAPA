@@ -16,7 +16,6 @@ def compute_all_traj_loss(replay_buffer=None, model=None, ref_model=None, stride
         length_1 = torch.tensor(meta_data['length'], device=model.device)
         length_2 = torch.tensor(meta_data['length_2'], device=model.device)
 
-        ref_model.eval()
         for param in ref_model.parameters():
             param.requires_grad = False
 
@@ -118,7 +117,6 @@ def compute_all_traj_image_loss(obs_keys, replay_buffer=None, model=None, ref_mo
         length_1 = torch.tensor(meta_data['length'], device=model.device)
         length_2 = torch.tensor(meta_data['length_2'], device=model.device)
 
-        ref_model.eval()
         for param in ref_model.parameters():
             param.requires_grad = False
 
@@ -219,6 +217,78 @@ def compute_all_traj_image_loss(obs_keys, replay_buffer=None, model=None, ref_mo
         traj_loss_1 = compute_traj_image_loss(obs_1, action_1, timesteps_1, model, ref_model, length_1, stride)
         # Compute loss for trajectory 2
         traj_loss_2 = compute_traj_image_loss(obs_2, action_2, timesteps_2, model, ref_model, length_2, stride)
+
+        # Average the losses
+        loss = (traj_loss_1 + traj_loss_2) / 2
+
+        return torch.mean(loss)
+    
+def compute_all_bet_traj_loss(replay_buffer=None, model=None, stride=1):
+    if replay_buffer is None:
+        return np.zeros([1])
+    else:
+        data = replay_buffer.data
+        meta_data = replay_buffer.meta
+        observations_1 = np.array(data['obs'], dtype=np.float32)
+        actions_1 = np.array(data['action'], dtype=np.float32)
+        observations_2 = np.array(data['obs_2'], dtype=np.float32)
+        actions_2 = np.array(data['action_2'], dtype=np.float32)
+        length_1 = torch.tensor(meta_data['length'], device=model.device)
+        length_2 = torch.tensor(meta_data['length_2'], device=model.device)
+
+        # Normalize data
+        batch_1 = {
+            'obs': observations_1,
+            'action': actions_1,
+        }
+
+        batch_2 = {
+            'obs': observations_2,
+            'action': actions_2,
+        }
+        nbatch_1 = model.normalizer.normalize(batch_1)
+        nbatch_2 = model.normalizer.normalize(batch_2)
+        obs_1, obs_2 = nbatch_1['obs'], nbatch_2['obs']
+        actions_1, actions_2 = nbatch_1['action'], nbatch_2['action']
+
+        # Slice trajectories
+        obs_1 = slice_episode(obs_1, horizon=model.horizon, stride=stride)
+        action_1 = slice_episode(actions_1, horizon=model.horizon, stride=stride)
+        obs_2 = slice_episode(obs_2, horizon=model.horizon, stride=stride)
+        action_2 = slice_episode(actions_2, horizon=model.horizon, stride=stride)
+
+        # Pre-allocate loss
+        traj_loss_1, traj_loss_2 = 0, 0
+
+        # Helper function to compute loss for a single trajectory
+        def compute_traj_loss(obs_slices, action_slices, model, length, stride):
+            total_loss = 0
+            
+            for idx, (obs_slide, action_slide) in enumerate(zip(obs_slices, action_slices)):
+                gamma_factors = model.gamma ** (idx * model.horizon)
+                obs_slide[:, model.n_obs_steps:, :] = -2
+
+                enc_obs = model.obs_encoding_net(obs_slide)
+                latent = model.action_ae.encode_into_latent(action_slide, enc_obs)
+
+                loss = model.get_pred_loss(
+                    obs_rep=enc_obs.clone(),
+                    target_latents=latent,
+                )
+
+                mask = (model.horizon + (idx - 1)*stride) <= length
+                mask = mask.int()
+
+                total_loss += (loss * mask) * gamma_factors
+
+            total_loss = torch.sum(total_loss, dim=-1)
+
+            return total_loss.detach()
+
+        # Compute loss for trajectory 1
+        traj_loss_1 = compute_traj_loss(obs_1, action_1, model, length_1, stride)
+        # Compute loss for trajectory 2
+        traj_loss_2 = compute_traj_loss(obs_2, action_2, model, length_2, stride)
 
         # Average the losses
         loss = (traj_loss_1 + traj_loss_2) / 2

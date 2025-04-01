@@ -261,14 +261,14 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
                 pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
 
+                pref_dataset.beta_model.online_update(
+                                                    dataset=pref_dataset.construct_pref_data(), 
+                                                    num_epochs=50 if online_epoch_idx == 0 else 35, 
+                                                    warm_up_epochs=5 if online_epoch_idx == 0 else 0,
+                                                    batch_size=5, 
+                                                    lr=2.0e-5 if online_epoch_idx == 0 else 1.0e-6,
+                                                    )
                 with torch.no_grad():
-                    pref_dataset.beta_model.online_update(
-                                                        dataset=pref_dataset.construct_pref_data(), 
-                                                        num_epochs=50 if online_epoch_idx == 0 else 35, 
-                                                        warm_up_epochs=5 if online_epoch_idx == 0 else 0,
-                                                        batch_size=5, 
-                                                        lr=2.0e-5 if online_epoch_idx == 0 else 1.0e-6,
-                                                        )
                     pref_dataset.update_beta_priori(batch_size=1)
 
                 self.model.map_ratio = (online_epoch_idx + 1) * cfg.training.map.map_ratio / (cfg.training.online.num_groups)

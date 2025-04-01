@@ -22,7 +22,7 @@ obs_as_cond: True
 pred_action_steps_only: False
 
 policy: 
-  _target_: diffusion_policy.policy.ours_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_
+  _target_: diffusion_policy.policy.cpl_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_
 
   model: 
     _target_: diffusion_policy.model.diffusion.transformer_for_diffusion.TransformerForDiffusion
@@ -54,7 +54,7 @@ policy:
     prediction_type: epsilon # or sample
 
   gamma: ${gamma}
-  beta: 3.57e-05 #cpl:1.785e-06 ;dpo:1.785e-06 ours:3.57e-05
+  beta: 1.785e-06 #cpl:1.785e-06 ;dpo:1.785e-06 ours:3.57e-05
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
   bias_reg: 0.25

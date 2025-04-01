@@ -122,21 +122,21 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         assert isinstance(dataset, BaseLowdimDataset)
         normalizer = dataset.get_normalizer()
 
-        # # configure dataset
-        # dataset_1: BaseLowdimDataset
-        # dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
-        # #device = torch.device(cfg.training.device_cpu)
-        # assert isinstance(dataset_1, BaseLowdimDataset)
+        # configure dataset
+        dataset_1: BaseLowdimDataset
+        dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
+        #device = torch.device(cfg.training.device_cpu)
+        assert isinstance(dataset_1, BaseLowdimDataset)
 
-        # # configure dataset
-        # dataset_2: BaseLowdimDataset
-        # dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
-        # # expert_normalizer = normal_dataset.get_normalizer()
-        # assert isinstance(dataset_2, BaseLowdimDataset)
+        # configure dataset
+        dataset_2: BaseLowdimDataset
+        dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
+        # expert_normalizer = normal_dataset.get_normalizer()
+        assert isinstance(dataset_2, BaseLowdimDataset)
 
         pref_dataset: BaseLowdimDataset
-        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset.replay_buffer, \
-                                               replay_buffer_2=dataset.replay_buffer) #cfg.task.perf_dataset
+        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, replay_buffer_1=dataset_1.replay_buffer, \
+                                               replay_buffer_2=dataset_2.replay_buffer) #cfg.task.perf_dataset
 
         # cut online groups
         votes_1, votes_2 = pref_dataset.pref_replay_buffer.meta['votes'], pref_dataset.pref_replay_buffer.meta['votes_2']
@@ -212,9 +212,10 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
             pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
             
+            # with torch.no_grad():
+            pref_dataset.set_beta_priori(data_size=100)
+            pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=50, warm_up_epochs=2, batch_size=20, lr=2.0e-5)
             with torch.no_grad():
-                pref_dataset.set_beta_priori(data_size=100)
-                pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=50, warm_up_epochs=2, batch_size=20, lr=2.0e-5)
                 pref_dataset.update_beta_priori(batch_size=1)
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
@@ -337,7 +338,7 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
                             # compute loss
                             avg_traj_loss = 0.0
-                            stride = self.model.n_obs_steps #int(np.round(self.model.horizon * 0.5))
+                            stride = int(np.round(self.model.horizon * 0.5))
                             if cfg.training.map.use_map:
                                 avg_traj_loss = compute_all_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
                                                                       model = self.model, ref_model = ref_policy.model, stride=stride)

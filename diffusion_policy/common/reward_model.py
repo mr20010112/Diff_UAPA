@@ -42,6 +42,8 @@ class RewardModel(object):
         self.action_dim = action_dim  # state: env.action_space.shape[0]
         self.ensemble_size = ensemble_size  # ensemble_size
         self.device = torch.device(device)
+        self.reward_mean = 0
+        self.reward_std = 1
 
         # build network
         self.activation = activation
@@ -57,6 +59,24 @@ class RewardModel(object):
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
+
+    def compute_global_reward_stats(self, pref_dataset):
+        """计算全局奖励统计量"""
+        all_obs = np.concatenate([pref_dataset["observations"], pref_dataset["observations_2"]], axis=0)
+        all_act = np.concatenate([pref_dataset["actions"], pref_dataset["actions_2"]], axis=0)
+        
+        rewards = []
+        for member in range(self.ensemble_size):
+            r_hat = self.r_hat_member(batch_obs=torch.from_numpy(all_obs).float().to(self.device), 
+                                      batch_act=torch.from_numpy(all_act).float().to(self.device), 
+                                      member=member).detach().cpu().numpy()
+            rewards.append(r_hat)
+            rewards.append(r_hat)
+        rewards = np.concatenate(rewards, axis=0)
+        
+        self.reward_mean = np.mean(rewards)
+        self.reward_std = np.std(rewards) + 1e-6  # 避免除零
+        self.logger.info(f"Global reward stats - mean: {self.reward_mean}, std: {self.reward_std}")
 
     def construct_ensemble(self):
         for i in range(self.ensemble_size):
@@ -127,6 +147,8 @@ class RewardModel(object):
             # early stop
             if np.mean(ensemble_acc) > 0.968 and "antmaze" not in self.task:
                 break
+                
+        self.compute_global_reward_stats(pref_dataset)
 
     def r3m_train(self, pref_dataset, data_size, batch_size, n_epochs=1, warm_up_epochs=0, lr=1.0e-4):
         interval = math.ceil(data_size / batch_size)
@@ -192,8 +214,8 @@ class RewardModel(object):
         comparable_labels = torch.from_numpy(np.argmax(labels, axis=1)).to(self.device)
 
         # get logits
-        r_hat1 = self.r_hat_member(s_a_1, member)  # batch_size * len_query * 1
-        r_hat2 = self.r_hat_member(s_a_2, member)
+        r_hat1 = self.r_hat_member(batch_obs=obs_1, batch_act=act_1, member=member)  # batch_size * len_query * 1
+        r_hat2 = self.r_hat_member(batch_obs=obs_2, batch_act=act_2, member=member)
         r_hat1 = r_hat1.sum(axis=1)  # batch_size * 1
         r_hat2 = r_hat2.sum(axis=1)
         r_hat = torch.cat([r_hat1, r_hat2], axis=1)  # batch_size * 2
@@ -297,23 +319,44 @@ class RewardModel(object):
         return curr_loss, correct
     
 
-    def r_hat_member(self, x, member):
-        return self.ensemble[member](torch.from_numpy(x).float().to(self.device))
+    def r_hat_member(self, batch_obs, batch_act, member):
+        return self.ensemble[member](
+            obs=batch_obs,
+            act=batch_act,
+        )
 
-    def get_reward_batch(self, x):
+    def get_reward_batch(self, batch_obs, batch_act):
         # they say they average the rewards from each member of the ensemble,
         # but I think this only makes sense if the rewards are already normalized.
         # but I don't understand how the normalization should be happening right now :(
         r_hats = []
         for member in range(self.ensemble_size):
-            r_hats.append(self.r_hat_member(x, member=member).detach().cpu().numpy())
+            r_hats.append(self.r_hat_member(batch_obs=batch_obs, batch_act=batch_act, 
+                                            member=member).detach().cpu().numpy())
         r_hats = np.array(r_hats)
-
-        return np.mean(r_hats, axis=0)
+        r_mean = np.mean(r_hats, axis=0)
+        
+        if self.reward_mean is None or self.reward_std is None:
+            self.logger.warning("Reward stats not computed, returning raw rewards!")
+            return r_mean
+        
+        normalized_r = (r_mean - self.reward_mean) / self.reward_std
+        return normalized_r
 
     def softXEnt_loss(self, input, target):
         logprobs = nn.functional.log_softmax(input, dim=1)
         return -(target * logprobs).sum() / input.shape[0]
+    
+    def forward(self, nobs, nactions):
+        with torch.no_grad():
+            reward = torch.mean(torch.stack([
+                self.ensemble[i](
+                    nobs, 
+                    nactions,
+                ) for i in range(len(self.ensemble))
+            ]), dim=0)
+
+        return (reward - self.reward_mean) / self.reward_std       
 
 
 class TransformerRewardModel(RewardModel):
@@ -389,6 +432,10 @@ class TransformerRewardModel(RewardModel):
         weights[torch.where(y==0.5)] = 0.0
         
         curr_loss = - (weights*(y*torch.log(p_1_2+1e-8) + (1-y)*torch.log(1-p_1_2+1e-8))).mean()
+        if self.ensemble_size > 1:
+            ensemble_preds = [self.r_hat_member(batch_obs=obs_1, batch_act=act_1, member=m).mean(axis=1) for m in range(self.ensemble_size)]
+            consistency_loss = sum((p1 - p2) ** 2 for p1, p2 in zip(ensemble_preds, ensemble_preds[1:])).mean()
+            curr_loss += 0.1 * consistency_loss
         
         # labels = utils.to_torch(labels, dtype=torch.long).to(self.device)
 

@@ -34,6 +34,7 @@ from diffusion_policy.model.common.normalizer import (
 )
 from diffusion_policy.common.json_logger import JsonLogger
 from diffusers.training_utils import EMAModel
+from diffusion_policy.common.compute_all_loss import compute_all_bet_traj_loss
 
 import time
 import logging
@@ -93,8 +94,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
 
         device = torch.device(cfg.training.device_gpu)
         ref_policy = copy.deepcopy(self.policy)
-        # ref_policy.double()
-        ref_policy.train() #.eval() 
+        ref_policy.train()
         for param in ref_policy.parameters():
             param.requires_grad = False
         ref_policy.to(device)
@@ -161,7 +161,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         votes_1_norm = (votes_1 - votes_min) / (votes_max - votes_min + 1e-8)
         votes_2_norm = (votes_2 - votes_min) / (votes_max - votes_min + 1e-8)
 
-        scale_factor = 10
+        scale_factor = 5
         votes_1 = votes_1_norm * scale_factor
         votes_2 = votes_2_norm * scale_factor
 
@@ -188,14 +188,27 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                 noise_ratio = X.rvs(all_votes_1.shape[1])
                 noise_ratio = noise_ratio.reshape(-1, 1)
 
-                # condiction = (all_votes_1[local_epoch_idx] > all_votes_2[local_epoch_idx])
                 all_votes_1[local_epoch_idx][indices], all_votes_2[local_epoch_idx][indices] = \
                     all_votes_1[local_epoch_idx][indices] + np.round((all_votes_2[local_epoch_idx][indices] - all_votes_1[local_epoch_idx][indices]) * noise_ratio[indices]), \
                     all_votes_2[local_epoch_idx][indices] + np.round((all_votes_1[local_epoch_idx][indices] - all_votes_2[local_epoch_idx][indices]) * noise_ratio[indices])
                 
-
                 all_votes_1[local_epoch_idx] = np.maximum(all_votes_1[local_epoch_idx], 0)
                 all_votes_2[local_epoch_idx] = np.maximum(all_votes_2[local_epoch_idx], 0)
+
+        if cfg.training.map.use_map:    
+            init_votes_1 = np.sum(all_votes_1, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
+            init_votes_2 = np.sum(all_votes_2, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
+
+            pref_dataset.pref_replay_buffer.meta['votes'] = init_votes_1.reshape(-1, 1)
+            pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2.reshape(-1, 1)
+            pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
+            pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
+            
+            # with torch.no_grad():
+            pref_dataset.set_beta_priori(data_size=100)
+            pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=50, warm_up_epochs=2, batch_size=5, lr=2.0e-5)
+            with torch.no_grad():
+                pref_dataset.update_beta_priori(batch_size=1)
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset
@@ -312,7 +325,11 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                             # compute loss
                             # torch.autograd.set_detect_anomaly(True)
                             stride = self.policy.n_obs_steps*2
-                            raw_loss = self.policy.compute_loss(batch, ref_policy=ref_policy, stride=stride)
+                            avg_traj_loss = 0.0
+                            if cfg.training.map.use_map:
+                                avg_traj_loss = compute_all_bet_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
+                                                                      model = self.policy, stride=stride)
+                            raw_loss = self.policy.compute_loss(batch, ref_policy=ref_policy, stride=stride, avg_traj_loss=avg_traj_loss)
                             loss = raw_loss / cfg.training.gradient_accumulate_every
                             loss.backward()
 
