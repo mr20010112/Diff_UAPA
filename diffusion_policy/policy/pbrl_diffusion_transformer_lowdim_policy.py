@@ -19,7 +19,7 @@ from diffusion_policy.model.diffusion.mask_generator import LowdimMaskGenerator
 
 from diffusion_policy.model.common.slice import slice_episode
 
-class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
+class EfficientDiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
     def __init__(self, 
             model: TransformerForDiffusion,
             noise_scheduler: DDPMScheduler,
@@ -34,9 +34,10 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             obs_as_cond=False,
             pred_action_steps_only=False,
             use_map=False,
-            beta=1.0,
             map_ratio=1.0,
             bias_reg=1.0,
+            guidance_scale=1.0,
+            early_stop_threshold=0.01,
             # parameters passed to step
             **kwargs):
         super().__init__()
@@ -63,10 +64,10 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         self.obs_as_cond = obs_as_cond
         self.pred_action_steps_only = pred_action_steps_only
         self.gamma = gamma
-        self.beta = beta
         self.bias_reg = bias_reg
+        self.guidance_scale = guidance_scale
+        self.early_stop_threshold = early_stop_threshold
         self.kwargs = kwargs
-
 
         if num_inference_steps is None:
             num_inference_steps = noise_scheduler.config.num_train_timesteps
@@ -76,6 +77,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
     def conditional_sample(self, 
             condition_data, condition_mask,
             cond=None, generator=None,
+            reward_model=None,
             # keyword arguments to scheduler.step
             **kwargs
             ):
@@ -90,28 +92,58 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
     
         # set step values
         scheduler.set_timesteps(self.num_inference_steps)
-
+        
+        # For early stopping
+        prev_trajectory = None
+        
         for t in scheduler.timesteps:
             # 1. apply conditioning
             trajectory[condition_mask] = condition_data[condition_mask]
 
             # 2. predict model output
             model_output = model(trajectory, t, cond)
-
+            
+            # Apply reward guidance if reward model is provided
+            if reward_model is not None and self.guidance_scale > 0:
+                # Extract observation and action for reward computation
+                if self.obs_as_cond:
+                    nobs = cond
+                    naction = trajectory
+                else:
+                    naction = trajectory[..., :self.action_dim]
+                    nobs = trajectory[..., self.action_dim:]
+                
+                # Compute reward gradient
+                with torch.enable_grad():
+                    naction_grad = naction.detach().clone().requires_grad_(True)
+                    reward = reward_model(nobs, naction_grad)
+                    reward_grad = torch.autograd.grad(reward.sum(), naction_grad)[0]
+                
+                # Apply guidance
+                guidance = self.guidance_scale * reward_grad
+                model_output = model_output + guidance
+            
             # 3. compute previous image: x_t -> x_t-1
             trajectory = scheduler.step(
                 model_output, t, trajectory, 
                 generator=generator,
                 **kwargs
                 ).prev_sample
+            
+            # Check for early stopping
+            if prev_trajectory is not None:
+                diff = torch.norm(trajectory - prev_trajectory)
+                if diff < self.early_stop_threshold:
+                    break
+            
+            prev_trajectory = trajectory.clone()
         
         # finally make sure conditioning is enforced
         trajectory[condition_mask] = condition_data[condition_mask]        
 
         return trajectory
 
-
-    def predict_action(self, obs_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def predict_action(self, obs_dict: Dict[str, torch.Tensor], reward_model=None) -> Dict[str, torch.Tensor]:
         """
         obs_dict: must include "obs" key
         result: must include "action" key
@@ -154,6 +186,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
             cond_data, 
             cond_mask,
             cond=cond,
+            reward_model=reward_model,
             **self.kwargs)
         
         # unnormalize prediction
@@ -192,51 +225,27 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 learning_rate=learning_rate, 
                 betas=tuple(betas))
 
-    def compute_loss(self, batch, ref_model: TransformerForDiffusion, avg_traj_loss=0.0, stride=1):
-
-        for param in ref_model.parameters():
-            param.requires_grad = False
-
+    def compute_loss(self, batch, reward_model: nn.Module, stride=1):
         observations_1 = batch["obs"].to(self.device)
         actions_1 = batch["action"].to(self.device)
-        votes_1 = batch["votes"].to(self.device)
         length_1 = batch["length"].to(self.device).detach()
         observations_2 = batch["obs_2"].to(self.device)
         actions_2 = batch["action_2"].to(self.device)
-        votes_2 = batch["votes_2"].to(self.device)
         length_2 = batch["length_2"].to(self.device).detach()
-
-
-        threshold = 1e-2
-        diff = torch.abs(votes_1 - votes_2)
-        condition_1 = (votes_1 > votes_2) & (diff >= threshold)  # votes_1 > votes_2 and diff >= threshold
-        condition_2 = (votes_1 < votes_2) & (diff >= threshold)  # votes_1 < votes_2 and diff >= threshold
-
-        votes_1 = torch.where(condition_1, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device))
-        votes_1 = torch.squeeze(votes_1, dim=-1).detach()
-        votes_2 = torch.where(condition_2, torch.tensor(1.0, device=self.device), torch.tensor(0.0, device=self.device))
-        votes_2 = torch.squeeze(votes_2, dim=-1).detach()
-
-        mask = condition_2.squeeze(-1)
-
-        actions_1[mask], actions_2[mask] = actions_2[mask], actions_1[mask]
-        observations_1[mask], observations_2[mask] = observations_2[mask], observations_1[mask]
-        length_1[mask], length_2[mask] = length_2[mask], length_1[mask]
+        bsz = observations_1.shape[0]
         
-        batch_1 = {
+        batch_data = {
             'obs': torch.tensor(observations_1, device=self.device),
             'action': torch.tensor(actions_1, device=self.device),
         }
 
-        batch_2 = {
+        batch_data_2 = {
             'obs': torch.tensor(observations_2, device=self.device),
             'action': torch.tensor(actions_2, device=self.device),
         }
 
-
-
-        nbatch_1 = self.normalizer.normalize(batch_1)
-        nbatch_2 = self.normalizer.normalize(batch_2)
+        nbatch_1 = self.normalizer.normalize(batch_data)
+        nbatch_2 = self.normalizer.normalize(batch_data_2)
 
         obs_1 = nbatch_1['obs']
         action_1 = nbatch_1['action']
@@ -250,102 +259,148 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
         obs_2 = slice_episode(obs_2, horizon=self.horizon, stride=stride)
         action_2 = slice_episode(action_2, horizon=self.horizon, stride=stride)
 
-        bsz = obs_1[0].shape[0]
+        
         loss = 0
 
         for _ in range(self.train_time_samples):
             timesteps_1 = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=self.device).long()
             timesteps_2 = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=self.device).long()
 
-            traj_loss_1, traj_loss_2 = 0, 0
-            immitation_loss = 0
-            # mseloss_1, mseloss_2 = 0, 0
+            diffusion_loss = 0
+            reward_loss = 0
 
             for i in range(len(obs_1)):
-                obs_1_slide = obs_1[i]
-                action_1_slide = action_1[i]
-                trajectory_1 = action_1_slide
-                cond_1 = None
+                obs_slide = obs_1[i]
+                action_slide = action_1[i]
+                trajectory = action_slide
+                cond = None
                 if self.obs_as_cond:
-                    cond_1 = obs_1_slide[:, :self.n_obs_steps, :]
-                    cond_1 = cond_1.to(self.device)
+                    cond = obs_slide[:, :self.n_obs_steps, :]
+                    cond = cond.to(self.device)
                     if self.pred_action_steps_only:
-                        trajectory_1 = action_1_slide[:, -self.n_action_steps:]
+                        trajectory = action_slide[:, -self.n_action_steps:]
                 else:
-                    trajectory_1 = torch.cat([action_1_slide, obs_1_slide], dim=-1)
-                trajectory_1 = trajectory_1.to(self.device)
-                condition_mask_1 = self.mask_generator(trajectory_1.shape).to(self.device)
-                noise_1 = torch.randn(trajectory_1.shape, device=self.device)
-                noisy_trajectory_1 = self.noise_scheduler.add_noise(trajectory_1, noise_1, timesteps_1)
+                    trajectory = torch.cat([action_slide, obs_slide], dim=-1)
+                trajectory = trajectory.to(self.device)
+                condition_mask = self.mask_generator(trajectory.shape).to(self.device)
+                noise = torch.randn(trajectory.shape, device=self.device)
+                noisy_trajectory = self.noise_scheduler.add_noise(trajectory, noise, timesteps_1)
 
-                loss_mask_1 = ~condition_mask_1
-                noisy_trajectory_1[condition_mask_1] = trajectory_1[condition_mask_1]
+                loss_mask = ~condition_mask
+                noisy_trajectory[condition_mask] = trajectory[condition_mask]
 
-                pred_1 = self.model(noisy_trajectory_1, timesteps_1, cond_1)
+                pred = self.model(noisy_trajectory, timesteps_1, cond)
 
-                pred_type_1 = self.noise_scheduler.config.prediction_type
-                target = noise_1 if pred_type_1 == 'epsilon' else trajectory_1
+                pred_type = self.noise_scheduler.config.prediction_type
+                target = noise if pred_type == 'epsilon' else trajectory
 
-                mask_1 = (self.horizon + (i-1)*stride) <= length_1
-                mask_1 = mask_1.int()
+                mask = (self.horizon + (i-1)*stride) <= length_1
+                mask = mask.int()
 
-                slice_loss_1 = torch.norm((pred_1 - noise_1) * loss_mask_1.type(pred_1.dtype), dim=-1) ** 2
-                # slice_loss_1 = F.mse_loss(pred_1 * loss_mask_1.type(pred_1.dtype), target * loss_mask_1.type(target.dtype), reduction='none')
+                # Diffusion loss
+                slice_loss = torch.norm((pred - noise) * loss_mask.type(pred.dtype), dim=-1) ** 2
+                
+                # Apply discount factor
+                discount_factors = (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device))).reshape(1, -1)
+                diffusion_loss += (slice_loss * mask) * discount_factors
 
-                traj_loss_1 += (slice_loss_1*mask_1) * (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device))).reshape(1, -1)
+                # Reward-guided loss
+                if reward_model is not None:
+                    # Extract observation and action for reward computation
+                    if self.obs_as_cond:
+                        nobs_reward = cond
+                        naction_reward = trajectory
+                    else:
+                        naction_reward = trajectory[..., :self.action_dim]
+                        nobs_reward = trajectory[..., self.action_dim:]
+                    
+                    # Compute reward
+                    rewards = reward_model.forward(nobs_reward, naction_reward)
+                    reward_loss -= torch.mean(rewards * mask)  # Negative because we want to maximize reward
 
             for i in range(len(obs_2)):
-                obs_2_slide = obs_2[i]
-                action_2_slide = action_2[i]
-                trajectory_2 = action_2_slide
-                cond_2 = None
+                obs_slide = obs_2[i]
+                action_slide = action_2[i]
+                trajectory = action_slide
+                cond = None
                 if self.obs_as_cond:
-                    cond_2 = obs_2_slide[:, :self.n_obs_steps, :]
-                    cond_2 = cond_2.to(self.device)
+                    cond = obs_slide[:, :self.n_obs_steps, :]
+                    cond = cond.to(self.device)
                     if self.pred_action_steps_only:
-                        trajectory_2 = action_2_slide[:, -self.n_action_steps:]
+                        trajectory = action_slide[:, -self.n_action_steps:]
                 else:
-                    trajectory_2 = torch.cat([action_2_slide, obs_2_slide], dim=-1)
-                trajectory_2 = trajectory_2.to(self.device)
-                # condition_mask_2 = self.mask_generator(trajectory_2.shape).to(self.device)
-                condition_mask_2 = self.mask_generator(trajectory_2.shape).to(self.device)
-                noise_2 = torch.randn(trajectory_2.shape, device=self.device)
-                noisy_trajectory_2 = self.noise_scheduler.add_noise(trajectory_2, noise_2, timesteps_2)
+                    trajectory = torch.cat([action_slide, obs_slide], dim=-1)
+                trajectory = trajectory.to(self.device)
+                condition_mask = self.mask_generator(trajectory.shape).to(self.device)
+                noise = torch.randn(trajectory.shape, device=self.device)
+                noisy_trajectory = self.noise_scheduler.add_noise(trajectory, noise, timesteps_2)
 
-                loss_mask_2 = ~condition_mask_2
-                noisy_trajectory_2[condition_mask_2] = trajectory_2[condition_mask_2]
+                loss_mask = ~condition_mask
+                noisy_trajectory[condition_mask] = trajectory[condition_mask]
 
-                pred_2 = self.model(noisy_trajectory_2, timesteps_2, cond_2)
+                pred = self.model(noisy_trajectory, timesteps_2, cond)
 
-                pred_type_2 = self.noise_scheduler.config.prediction_type
-                target = noise_2 if pred_type_2 == 'epsilon' else trajectory_2
+                pred_type = self.noise_scheduler.config.prediction_type
+                target = noise if pred_type == 'epsilon' else trajectory
 
-                mask_2 = (self.horizon + (i-1)*stride) <= length_2
-                mask_2 = mask_2.int()
+                mask = (self.horizon + (i-1)*stride) <= length_2
+                mask = mask.int()
 
-                slice_loss_2 = torch.norm((pred_2 - noise_2) * loss_mask_2.type(pred_2.dtype), dim=-1) ** 2
-                # slice_loss_2 = F.mse_loss(pred_2 * loss_mask_2.type(pred_2.dtype), target * loss_mask_2.type(target.dtype), reduction='none')
+                # Diffusion loss
+                slice_loss = torch.norm((pred - noise) * loss_mask.type(pred.dtype), dim=-1) ** 2
+                
+                # Apply discount factor
+                discount_factors = (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device))).reshape(1, -1)
+                diffusion_loss += (slice_loss * mask) * discount_factors
+                
+                # Reward-guided loss
+                if reward_model is not None:
+                    # Extract observation and action for reward computation
+                    if self.obs_as_cond:
+                        nobs_reward = cond
+                        naction_reward = trajectory
+                    else:
+                        naction_reward = trajectory[..., :self.action_dim]
+                        nobs_reward = trajectory[..., self.action_dim:]
+                    
+                    # Compute reward
+                    rewards = reward_model.forward(nobs_reward, naction_reward)
+                    reward_loss -= torch.mean(rewards * mask)  # Negative because we want to maximize reward
 
-                traj_loss_2 += (slice_loss_2*mask_2) * (self.gamma ** (i*self.horizon + torch.arange(0, self.horizon, device=self.device))).reshape(1, -1)
-
-
-            traj_loss_1 = torch.sum(traj_loss_1, dim=-1)
-            traj_loss_2 = torch.sum(traj_loss_2, dim=-1)
-            immitation_loss = (traj_loss_1 + traj_loss_2)
-
-            # term = torch.ones(timesteps.shape, device=self.device)
-
-            traj_loss_1 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_1
-            traj_loss_2 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_2
-            avg_traj_loss = -self.beta * self.noise_scheduler.config.num_train_timesteps * avg_traj_loss
-
-
-            diff_loss_1 = torch.mean(torch.abs(traj_loss_1 - self.bias_reg*traj_loss_2))
-            mean_immitation_loss = torch.mean(immitation_loss)*0.5
-
-            mle_loss_1 = -F.logsigmoid(traj_loss_1 - self.bias_reg*traj_loss_2) + immitation_loss/((len(obs_1) + len(obs_2))*self.horizon)
-
-
-            loss += mle_loss_1 / (2 * self.train_time_samples) 
+            diffusion_loss = torch.sum(diffusion_loss, dim=-1)
+            
+            # Combine losses
+            combined_loss = diffusion_loss + self.bias_reg * reward_loss
+            loss += combined_loss
             
         return torch.mean(loss)
+    
+    def efficient_sample_with_reward_guidance(self, obs_dict, reward_model, num_samples=5):
+        """
+        Sample multiple trajectories and select the one with highest reward
+        """
+        best_action = None
+        best_reward = float('-inf')
+        
+        for _ in range(num_samples):
+            # Sample a trajectory
+            result = self.predict_action(obs_dict, reward_model)
+            action = result['action']
+            
+            # Compute reward for this trajectory
+            nobs = self.normalizer['obs'].normalize(obs_dict['obs'])
+            naction = self.normalizer['action'].normalize(action)
+            
+            with torch.no_grad():
+                reward = reward_model(nobs, naction).mean().item()
+            
+            # Update best action if this one has higher reward
+            if reward > best_reward:
+                best_reward = reward
+                best_action = action
+        
+        # Return the best action and its predicted reward
+        return {
+            'action': best_action,
+            'predicted_reward': best_reward
+        }

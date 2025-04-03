@@ -59,7 +59,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
         self.policy = hydra.utils.instantiate(cfg.policy)
 
         # configure training state
-        self.optimizers = self.policy.get_optimizers(**cfg.optimizer)
+        self.optimizers = self.policy.get_optimizers(cfg=cfg)
 
         self.global_step = 0
         self.epoch = 0
@@ -75,7 +75,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
             if lastest_ckpt_path.is_file():
                 print(f"Resuming from checkpoint {lastest_ckpt_path}")
                 self.load_checkpoint(path=lastest_ckpt_path)
-            self.optimizers = self.policy.get_optimizers(**cfg.optimizer)
+            self.optimizers = self.policy.get_optimizers(cfg=cfg)
             self.global_step = 0
             self.epoch = 0
 
@@ -263,7 +263,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                 pref_dataset.pref_replay_buffer.root['meta']['votes'] = local_votes_1
                 pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = local_votes_2
 
-                self.optimizer = self.policy.get_optimizer(**cfg.optimizer)
+                self.optimizers = self.policy.get_optimizers(cfg=cfg)
 
                 lr_schedulers = {
                     key: get_scheduler(
@@ -300,7 +300,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                     'actions_2': self.policy.normalizer['action'].normalize(pref_dataset.pref_replay_buffer.data['action_2']).cpu().numpy(),
                     'labels': labels 
                 }
-                self.reward_model.train(pref_dataset=pref_data, **cfg.reward_training)
+                # self.reward_model.train(pref_dataset=pref_data, **cfg.reward_training)
 
                 train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
                 for local_epoch_idx in range(cfg.training.num_epochs):

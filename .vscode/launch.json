@@ -11,7 +11,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "--config-name=pbrl_reward_bet_lowdim_halfcheetah_online_workspace.yaml"
+                "--config-name=pbrl_reward_diffusion_transformer_lowdim_halfcheetah_online_workspace.yaml"
             ],
             "env": {
                 "CUDA_VISIBLE_DEVICES": "0",

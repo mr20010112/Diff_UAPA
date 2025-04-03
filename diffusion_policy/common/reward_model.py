@@ -61,7 +61,6 @@ class RewardModel(object):
         self.logger.addHandler(handler)
 
     def compute_global_reward_stats(self, pref_dataset):
-        """计算全局奖励统计量"""
         all_obs = np.concatenate([pref_dataset["observations"], pref_dataset["observations_2"]], axis=0)
         all_act = np.concatenate([pref_dataset["actions"], pref_dataset["actions_2"]], axis=0)
         
@@ -106,7 +105,7 @@ class RewardModel(object):
         main_steps = total_steps - warm_up_steps
 
         self.lr = lr
-        self.opt = torch.optim.Adam(self.paramlst, lr=self.lr, weight_decay=1.0e-5)
+        self.opt = torch.optim.Adam(self.paramlst, lr=self.lr, weight_decay=0)
         warm_up_scheduler = LinearLR(self.opt, start_factor=1e-8, end_factor=1.0, total_iters=warm_up_steps)
         cosine_scheduler = CosineAnnealingLR(self.opt, T_max=main_steps)
         self.scheduler = SequentialLR(self.opt, schedulers=[warm_up_scheduler, cosine_scheduler], milestones=[warm_up_steps])
@@ -147,8 +146,9 @@ class RewardModel(object):
             # early stop
             if np.mean(ensemble_acc) > 0.968 and "antmaze" not in self.task:
                 break
-                
-        self.compute_global_reward_stats(pref_dataset)
+
+        with torch.no_grad():
+            self.compute_global_reward_stats(pref_dataset)    
 
     def r3m_train(self, pref_dataset, data_size, batch_size, n_epochs=1, warm_up_epochs=0, lr=1.0e-4):
         interval = math.ceil(data_size / batch_size)

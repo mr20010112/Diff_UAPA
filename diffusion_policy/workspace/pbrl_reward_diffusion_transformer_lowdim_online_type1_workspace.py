@@ -289,7 +289,7 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             'actions_2': pref_dataset.pref_replay_buffer.data['action_2'],
             'labels': labels 
         }
-        self.reward_model.r3m_train(pref_dataset=pref_data, **cfg.reward_training)
+        self.reward_model.train(pref_dataset=pref_data, **cfg.reward_training)
 
         time.sleep(0.5)
         stage3_time = datetime.now()

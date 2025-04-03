@@ -22,7 +22,7 @@ obs_as_cond: True
 pred_action_steps_only: False
 
 policy: 
-  _target_: diffusion_policy.policy.ours_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_, r3m_dpo_
+  _target_: diffusion_policy.policy.pbrl_diffusion_transformer_lowdim_policy.EfficientDiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_, r3m_dpo_
 
   model: 
     _target_: diffusion_policy.model.diffusion.transformer_for_diffusion.TransformerForDiffusion
@@ -154,7 +154,7 @@ training:
     reverse_freq: 1
     update_history: False
   map:
-    use_map: True #True
+    use_map: False #True
     map_ratio: 0.25
 
 
