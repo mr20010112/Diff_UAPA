@@ -225,7 +225,7 @@ class EfficientDiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 learning_rate=learning_rate, 
                 betas=tuple(betas))
 
-    def compute_loss(self, batch, reward_model: nn.Module, stride=1):
+    def compute_loss(self, batch, ref_model:TransformerForDiffusion, reward_model:nn.Module, stride=1):
         observations_1 = batch["obs"].to(self.device)
         actions_1 = batch["action"].to(self.device)
         length_1 = batch["length"].to(self.device).detach()
