@@ -29,7 +29,6 @@ class RealPushTImageDataset(BaseImageDataset):
     def __init__(self,
             shape_meta: dict,
             dataset_path: str,
-            rlhf_path: str,
             horizon=1,
             pad_before=0,
             pad_after=0,
@@ -42,7 +41,6 @@ class RealPushTImageDataset(BaseImageDataset):
             delta_action=False,
         ):
         assert os.path.isdir(dataset_path)
-        #assert os.path.isdir(rlhf_path)
         
         replay_buffer = None
         if use_cache:
@@ -117,39 +115,47 @@ class RealPushTImageDataset(BaseImageDataset):
             for key in rgb_keys + lowdim_keys:
                 key_first_k[key] = n_obs_steps
 
-        # val_mask = get_val_mask(
-        #     n_episodes=replay_buffer.n_episodes, 
-        #     val_ratio=val_ratio,
-        #     seed=seed)
-        # train_mask = ~val_mask
-        # train_mask = downsample_mask(
-        #     mask=train_mask, 
-        #     max_n=max_train_episodes, 
-        #     seed=seed)
+        val_mask = get_val_mask(
+            n_episodes=replay_buffer.n_episodes, 
+            val_ratio=val_ratio,
+            seed=seed)
+        train_mask = ~val_mask
+        train_mask = downsample_mask(
+            mask=train_mask, 
+            max_n=max_train_episodes, 
+            seed=seed)
 
         sampler = SequenceSampler(
-            replay_buffer=replay_buffer,
-            rlhf_path = rlhf_path,
-            )
+            replay_buffer=replay_buffer, 
+            sequence_length=horizon+n_latency_steps,
+            pad_before=pad_before, 
+            pad_after=pad_after,
+            episode_mask=train_mask,
+            key_first_k=key_first_k)
         
         self.replay_buffer = replay_buffer
         self.sampler = sampler
         self.shape_meta = shape_meta
         self.rgb_keys = rgb_keys
         self.lowdim_keys = lowdim_keys
-        #self.n_obs_steps = n_obs_steps
-        #self.val_mask = val_mask
-        with open(rlhf_path, 'r') as f:
-            self.rlhf_data = json.load(f)
+        self.n_obs_steps = n_obs_steps
+        self.val_mask = val_mask
+        self.horizon = horizon
+        self.n_latency_steps = n_latency_steps
+        self.pad_before = pad_before
+        self.pad_after = pad_after
 
-    # def get_validation_dataset(self):
-    #     val_set = copy.copy(self)
-    #     val_set.sampler = SequenceSampler(
-    #         replay_buffer=self.replay_buffer, 
-    #         episode_mask=self.val_mask
-    #         )
-    #     val_set.val_mask = ~self.val_mask
-    #     return val_set
+    def get_validation_dataset(self):
+        val_set = copy.copy(self)
+        val_set.sampler = SequenceSampler(
+            replay_buffer=self.replay_buffer, 
+            sequence_length=self.horizon+self.n_latency_steps,
+            pad_before=self.pad_before, 
+            pad_after=self.pad_after,
+            episode_mask=self.val_mask
+            )
+        val_set.val_mask = ~self.val_mask
+        return val_set
 
     def get_normalizer(self, **kwargs) -> LinearNormalizer:
         normalizer = LinearNormalizer()
@@ -176,39 +182,40 @@ class RealPushTImageDataset(BaseImageDataset):
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         threadpool_limits(1)
-        
-        # 通过索引从RLHF数据集获取样本数据
-        sample = self.rlhf_data[str(idx)]
-        
-        trajectory_data = dict()
-        for trajectory_index in ['0', '1']:
-            trajectory_info = sample[trajectory_index]
-            traj_id = trajectory_info['id']
-            vote = trajectory_info['vote']
-            
-            # 获取完整轨迹信息
-            trajectory = self.replay_buffer.get_episode(traj_id, copy=True)
-            
-            obs_dict = dict()
-            for key in self.rgb_keys:
-                obs_dict[key] = np.moveaxis(trajectory[key], -1, 1).astype(np.float32) / 255.
-            
-            for key in self.lowdim_keys:
-                obs_dict[key] = trajectory[key].astype(np.float32)
-            
-            action = trajectory['action'].astype(np.float32)
-            
-            # 构造返回的数据
-            torch_data = {
-                'vote': vote,
-                'obs': dict_apply(obs_dict, torch.from_numpy),
-                'action': torch.from_numpy(action)
-            }
-            
-            # 将每条轨迹的数据加入到trajectory_data中
-            trajectory_data[trajectory_index] = torch_data
+        data = self.sampler.sample_sequence(idx)
 
-        return trajectory_data
+        # to save RAM, only return first n_obs_steps of OBS
+        # since the rest will be discarded anyway.
+        # when self.n_obs_steps is None
+        # this slice does nothing (takes all)
+        T_slice = slice(self.n_obs_steps)
+
+        obs_dict = dict()
+        for key in self.rgb_keys:
+            # move channel last to channel first
+            # T,H,W,C
+            # convert uint8 image to float32
+            obs_dict[key] = np.moveaxis(data[key][T_slice],-1,1
+                ).astype(np.float32) / 255.
+            # T,C,H,W
+            # save ram
+            del data[key]
+        for key in self.lowdim_keys:
+            obs_dict[key] = data[key][T_slice].astype(np.float32)
+            # save ram
+            del data[key]
+        
+        action = data['action'].astype(np.float32)
+        # handle latency by dropping first n_latency_steps action
+        # observations are already taken care of by T_slice
+        if self.n_latency_steps > 0:
+            action = action[self.n_latency_steps:]
+
+        torch_data = {
+            'obs': dict_apply(obs_dict, torch.from_numpy),
+            'action': torch.from_numpy(action)
+        }
+        return torch_data
 
 def zarr_resize_index_last_dim(zarr_arr, idxs):
     actions = zarr_arr[:]

@@ -1,18 +1,18 @@
 import h5py
 
 # 指定 HDF5 文件路径
-file_path = "data/robomimic/datasets/can/ph/low_dim.hdf5"
+file_path = "data/realrobot/expert/1399.hdf5"
 
 # 打开 HDF5 文件
 with h5py.File(file_path, "r") as h5_file:
     print(f"Exploring HDF5 file: {file_path}")
     
     # 遍历文件结构
-    for name, obj in h5_file.items():
-        if isinstance(obj, h5py.Group):
-            print(f"Group: {name}")
-        elif isinstance(obj, h5py.Dataset):
-            print(f"  Dataset: {name} | Shape: {obj.shape} | Type: {obj.dtype}")
+    # for name, obj in h5_file.items():
+    #     if isinstance(obj, h5py.Group):
+    #         print(f"Group: {name}")
+    #     elif isinstance(obj, h5py.Dataset):
+    #         print(f"  Dataset: {name} | Shape: {obj.shape} | Type: {obj.dtype}")
     
     # 如果需要深入递归访问
     def print_structure(name, obj):

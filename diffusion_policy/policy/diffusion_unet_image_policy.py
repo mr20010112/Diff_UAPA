@@ -192,15 +192,10 @@ class DiffusionUnetImagePolicy(BaseImagePolicy):
     def compute_loss(self, batch):
         # normalize input
         #assert 'valid_mask' not in batch
-        nobs_1 = self.normalizer.normalize(batch[0]['obs'])
-        nactions_1 = self.normalizer['action'].normalize(batch[0]['action'])
-        batch_size_1 = nactions_1.shape[0]
-        horizon_1 = nactions_1.shape[1]
-
-        nobs_2 = self.normalizer.normalize(batch[1]['obs'])
-        nactions_2 = self.normalizer['action'].normalize(batch[1]['action'])
-        batch_size_2 = nactions_2.shape[0]
-        horizon_2 = nactions_2.shape[1]
+        nobs = self.normalizer.normalize(batch['obs'])
+        nactions = self.normalizer['action'].normalize(batch['action'])
+        batch_size = nactions.shape[0]
+        horizon = nactions.shape[1]
 
         # handle different ways of passing observation
         local_cond = None

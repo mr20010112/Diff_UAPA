@@ -1,8 +1,6 @@
 {
     "version": "0.2.0",
     "configurations": [
-
-
         {
             "name": "Python 调试程序: 当前文件",
             "type": "python",
@@ -11,10 +9,11 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "--config-name=pbrl_reward_diffusion_transformer_lowdim_halfcheetah_online_workspace.yaml"
+                "--config-name=train_diffusion_unet_real_image_workspace",
+                "task.dataset_path=data/demo_pusht_real"
             ],
             "env": {
-                "CUDA_VISIBLE_DEVICES": "0",
+                "CUDA_VISIBLE_DEVICES": "0"
             }
         }
     ]
