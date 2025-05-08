@@ -9,8 +9,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "--config-name=train_diffusion_unet_real_image_workspace",
-                "task.dataset_path=data/demo_pusht_real"
+                "--config-name=train_diffusion_realrobot_workspace",
             ],
             "env": {
                 "CUDA_VISIBLE_DEVICES": "0"

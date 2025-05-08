@@ -11,7 +11,7 @@ from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
 class RealRobotImageObsEncoder(ModuleAttrMixin):
     def __init__(self,
             shape_meta: dict,
-            rgb_keys: dict,
+            rgb_keys: list,
             rgb_model: Union[nn.Module, Dict[str,nn.Module]],
             resize_shape: Union[Tuple[int,int], Dict[str,tuple], None]=None,
             crop_shape: Union[Tuple[int,int], Dict[str,tuple], None]=None,
@@ -109,14 +109,12 @@ class RealRobotImageObsEncoder(ModuleAttrMixin):
         key_transform_map[key] = this_transform
 
         rgb_keys = sorted(rgb_keys)
-        low_dim_keys = sorted(low_dim_keys)
 
         self.shape_meta = shape_meta
         self.key_model_map = key_model_map
         self.key_transform_map = key_transform_map
         self.share_rgb_model = share_rgb_model
         self.rgb_keys = rgb_keys
-        self.low_dim_keys = low_dim_keys
         self.key_shape_map = key_shape_map
 
     def forward(self, obs_dict):
@@ -158,16 +156,6 @@ class RealRobotImageObsEncoder(ModuleAttrMixin):
                 img = self.key_transform_map[key](img)
                 feature = self.key_model_map[key](img)
                 features.append(feature)
-        
-        # process lowdim input
-        for key in self.low_dim_keys:
-            data = obs_dict[key]
-            if batch_size is None:
-                batch_size = data.shape[0]
-            else:
-                assert batch_size == data.shape[0]
-            assert data.shape[1:] == self.key_shape_map[key]
-            features.append(data)
         
         # concatenate all features
         result = torch.cat(features, dim=-1)

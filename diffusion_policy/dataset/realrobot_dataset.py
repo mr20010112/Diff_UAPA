@@ -10,11 +10,11 @@ from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.common.realrobot_replay_buffer import RealRobotReplayBuffer
 from diffusion_policy.common.realrobot_sampler import RealRobotSequenceSampler, get_val_mask
 from diffusion_policy.model.common.normalizer import LinearNormalizer, SingleFieldLinearNormalizer
-from diffusion_policy.dataset.base_dataset import BaseLowdimDataset
+from diffusion_policy.dataset.base_dataset import BaseImageDataset
 
 
 
-class Hdf5RealRobotDataset(BaseLowdimDataset):
+class Hdf5RealRobotDataset(BaseImageDataset):
     def __init__(self,
             dataset_dir=None,
             horizon=1,

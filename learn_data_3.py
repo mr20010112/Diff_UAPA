@@ -1,7 +1,7 @@
 import h5py
 
 # 指定 HDF5 文件路径
-file_path = "data/realrobot/expert/1399.hdf5"
+file_path = "data/realrobot/expert/1499.hdf5"
 
 # 打开 HDF5 文件
 with h5py.File(file_path, "r") as h5_file:

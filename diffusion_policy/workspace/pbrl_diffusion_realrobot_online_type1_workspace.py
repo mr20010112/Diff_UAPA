@@ -22,7 +22,7 @@ import shutil
 import math
 import scipy.stats as stats
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
-from diffusion_policy.policy.diffusion_transformer_realrobot_policy import DiffusionTransformerRealRobotPolicy
+from diffusion_policy.policy.diffusion_realrobot_policy import DiffusionRealRobotPolicy
 from diffusion_policy.dataset.base_dataset import BaseImageDataset
 from diffusion_policy.env_runner.base_image_runner import BaseImageRunner
 from diffusion_policy.common.checkpoint_util import TopKCheckpointManager
@@ -34,7 +34,7 @@ from diffusion_policy.common.compute_all_loss import compute_all_traj_image_loss
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
-class PbrlDiffusionTransformerHybridWorkspace(BaseWorkspace):
+class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
     include_keys = ['global_step', 'epoch']
 
     def __init__(self, cfg: OmegaConf, output_dir=None):
@@ -47,9 +47,9 @@ class PbrlDiffusionTransformerHybridWorkspace(BaseWorkspace):
         random.seed(seed)
 
         # configure model
-        self.model: DiffusionTransformerRealRobotPolicy = hydra.utils.instantiate(cfg.policy)
+        self.model: DiffusionRealRobotPolicy = hydra.utils.instantiate(cfg.policy)
 
-        self.ema_model: DiffusionTransformerRealRobotPolicy = None
+        self.ema_model: DiffusionRealRobotPolicy = None
         if cfg.training.use_ema:
             self.ema_model = copy.deepcopy(self.model)
 

@@ -6,6 +6,7 @@ import zarr
 import numcodecs
 import numpy as np
 from functools import cached_property
+import cv2
 
 def check_chunks_compatible(chunks: tuple, shape: tuple):
     assert len(shape) == len(chunks)
@@ -579,8 +580,8 @@ class RealRobotReplayBuffer:
 
         all_cam_images = []
         for cam_name in camera_keys:
-            all_cam_images.append(observations['images'][cam_name])
-        all_cam_images = np.concatenate(all_cam_images, axis=0)
+            cam_images = observations['images'][cam_name]
+            all_cam_images.append(cv2.imdecode(cam_images, 1))
         image_data = np.einsum('k h w c -> k c h w', all_cam_images)
         image_data = image_data / 255.0
     
