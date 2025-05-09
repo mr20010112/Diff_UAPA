@@ -587,17 +587,17 @@ class RealRobotReplayBuffer:
         for cam_name in camera_keys:
             decompressed_images = []
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                results = executor.map(decode_image, observations['images'][cam_name][:compress_len])
+                results = executor.map(decode_image, \
+                            observations['images'][cam_name][:int(compress_len[0])])
                 decompressed_images = list(results)
 
             decompressed_images = np.array(decompressed_images)
+            decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
+            decompressed_images = decompressed_images / 255.0
             all_cam_images.update({cam_name: decompressed_images.astype(np.float32)})
-
-        # image_data = np.einsum('k h w c -> k c h w', all_cam_images)
-        # image_data = image_data / 255.0
     
         episode = {
-            'image': all_cam_images,
+            'obs': all_cam_images,
             'action': action.astype(np.float32),
             # 'qpos': qpos.astype(np.float32),
         }
@@ -622,18 +622,19 @@ class RealRobotReplayBuffer:
             result[key] = x
         return result
 
-    def unflatten_dataset_dict(flat_dict, sep='/'):
-        nested_dict = {}
-        for flat_key, value in flat_dict.items():
-            keys = flat_key.split(sep)
-            d = nested_dict
-            for k in keys[:-1]:
-                if k not in d:
-                    d[k] = {}
-                d = d[k]
-            d[keys[-1]] = value
-        return nested_dict
-
+    def unflatten_dataset_dict(self, flat_dict, delimiter='/'):
+        result = {}
+        for compound_key, value in flat_dict.items():
+            keys = compound_key.split(delimiter)
+            current = result
+            for key in keys[:-1]:
+                if key not in current:
+                    current[key] = {}
+                current = current[key]
+            current[keys[-1]] = value
+        
+        return result
+    
     # =========== chunking =============
     def get_chunks(self) -> dict:
         assert self.backend == 'zarr'

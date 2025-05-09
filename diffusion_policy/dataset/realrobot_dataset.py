@@ -120,6 +120,7 @@ class Hdf5RealRobotDataset(BaseImageDataset):
                 #     'qpos': qpos.astype(np.float32),
                 # }
                 data = h5_to_data(f)
+                del data['compress_len']
                 for key in data['observations']['images'].keys():
                     image_data = data['observations']['images'][key]
                     save_length = image_data.shape[-1]
@@ -135,10 +136,8 @@ class Hdf5RealRobotDataset(BaseImageDataset):
                     # decompressed_images = np.array(decompressed_images)
                     # data['observations']['images'][key] = decompressed_images
 
-
-
                 data = flatten_dataset_dict(data)
-                del data['compress_len'] 
+                 
 
                 self.replay_buffer.add_episode(data)
 
