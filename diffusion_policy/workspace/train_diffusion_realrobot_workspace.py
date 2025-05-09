@@ -51,7 +51,8 @@ class TrainDiffusionRealRobotWorkspace(BaseWorkspace):
             self.ema_model = copy.deepcopy(self.model)
 
         # configure training state
-        self.optimizer = self.model.get_optimizer(**cfg.optimizer)
+        self.optimizer = hydra.utils.instantiate(
+            cfg.optimizer, params=self.model.parameters())
 
         # configure training state
         self.global_step = 0
@@ -62,24 +63,21 @@ class TrainDiffusionRealRobotWorkspace(BaseWorkspace):
 
         # resume training
         if cfg.training.resume:
-            ckpt_path = pathlib.Path(cfg.checkpoint_dir)
-            if ckpt_path.is_file():
-                print(f"Resuming from checkpoint {ckpt_path}")
-                self.load_checkpoint(path=ckpt_path)
-            self.optimizer = self.model.get_optimizer(**cfg.optimizer)
-            self.global_step = 0
-            self.epoch = 0
+            lastest_ckpt_path = self.get_checkpoint_path()
+            if lastest_ckpt_path.is_file():
+                print(f"Resuming from checkpoint {lastest_ckpt_path}")
+                self.load_checkpoint(path=lastest_ckpt_path)
 
         # configure dataset
         dataset: BaseImageDataset
-        dataset = hydra.utils.instantiate(cfg.dataset)
+        dataset = hydra.utils.instantiate(cfg.task.dataset)
         assert isinstance(dataset, BaseImageDataset)
         train_dataloader = DataLoader(dataset, **cfg.dataloader)
         normalizer = dataset.get_normalizer()
 
         # configure validation dataset
-        val_dataset = dataset.get_validation_dataset()
-        val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
+        #val_dataset = dataset.get_validation_dataset()
+        #val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
 
         self.model.set_normalizer(normalizer)
         if cfg.training.use_ema:
@@ -129,7 +127,7 @@ class TrainDiffusionRealRobotWorkspace(BaseWorkspace):
         if self.ema_model is not None:
             self.ema_model.to(device)
         optimizer_to(self.optimizer, device)
-        
+
         # save batch for sampling
         train_sampling_batch = None
 
@@ -148,6 +146,10 @@ class TrainDiffusionRealRobotWorkspace(BaseWorkspace):
             for local_epoch_idx in range(cfg.training.num_epochs):
                 step_log = dict()
                 # ========= train for this epoch ==========
+                if cfg.training.freeze_encoder:
+                    self.model.obs_encoder.eval()
+                    self.model.obs_encoder.requires_grad_(False)
+
                 train_losses = list()
                 with tqdm.tqdm(train_dataloader, desc=f"Training epoch {self.epoch}", 
                         leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
@@ -278,7 +280,7 @@ class TrainDiffusionRealRobotWorkspace(BaseWorkspace):
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")), 
     config_name=pathlib.Path(__file__).stem)
 def main(cfg):
-    workspace = TrainDiffusionTransformerRealRobotWorkspace(cfg)
+    workspace = TrainDiffusionRealRobotWorkspace(cfg)
     workspace.run()
 
 if __name__ == "__main__":

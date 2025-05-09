@@ -39,7 +39,6 @@ policy:
   obs_encoder:
     _target_: diffusion_policy.model.vision.realrobot_image_obs_encoder.RealRobotImageObsEncoder
     shape_meta: ${shape_meta}
-    rgb_keys: ['camera_left', 'camera_right']
     rgb_model:
       _target_: diffusion_policy.model.vision.model_getter.get_resnet
       name: resnet18

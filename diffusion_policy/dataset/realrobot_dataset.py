@@ -5,7 +5,9 @@ import copy
 import pathlib
 import h5py
 import os
+import cv2
 from tqdm import tqdm
+import concurrent.futures
 from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.common.realrobot_replay_buffer import RealRobotReplayBuffer
 from diffusion_policy.common.realrobot_sampler import RealRobotSequenceSampler, get_val_mask
@@ -25,9 +27,6 @@ class Hdf5RealRobotDataset(BaseImageDataset):
             val_ratio=0.0
         ):
         super().__init__()
-
-        if not abs_action:
-            raise NotImplementedError()
 
         # camera2robot_matrix = np.array([[ 0.992127, 0.016251, 0.124175, 0.306697],
         # [-0.04194, -0.891172, 0.451723,-0.409919],
@@ -77,8 +76,21 @@ class Hdf5RealRobotDataset(BaseImageDataset):
 
         hdf5_files = [f for f in os.listdir(dataset_dir) if f.endswith(('.hdf5', '.h5'))]
 
+        def h5_to_data(h5_obj):
+            result = {}
+            for key, item in h5_obj.items():
+                if isinstance(item, h5py.Dataset):
+                    # 如果是dataset，读出数据赋值
+                    result[key] = item[()]
+                elif isinstance(item, h5py.Group):
+                    # 如果是group，递归调用
+                    result[key] = h5_to_data(item)
+            return result
 
-        for filename in hdf5_files:
+        def decode_image(data):
+            return cv2.imdecode(data, 1)
+
+        for filename in tqdm(hdf5_files, desc='Processing HDF5 files'):
             file_path = os.path.join(dataset_dir, filename)
             with h5py.File(file_path, 'r') as f:
                 # observations = f['observations']
@@ -107,9 +119,26 @@ class Hdf5RealRobotDataset(BaseImageDataset):
                 #     'action': action.astype(np.float32),
                 #     'qpos': qpos.astype(np.float32),
                 # }
+                data = h5_to_data(f)
+                for key in data['observations']['images'].keys():
+                    image_data = data['observations']['images'][key]
+                    save_length = image_data.shape[-1]
+                    pad_image_data = np.pad(image_data, ((0, 0), (0, 200000-save_length)), 'constant', constant_values = (0,0))
+                    data['observations']['images'][key] = pad_image_data
+                    compress_len = np.tile([save_length], (image_data.shape[0], 1))
+                    data.update({'compress_len':compress_len})
+                    # decompressed_images = []
+                    # with concurrent.futures.ThreadPoolExecutor() as executor:
+                    #     results = executor.map(decode_image, image_data)
+                    #     decompressed_images = list(results)
 
-                data = flatten_dataset_dict(f)
+                    # decompressed_images = np.array(decompressed_images)
+                    # data['observations']['images'][key] = decompressed_images
 
+
+
+                data = flatten_dataset_dict(data)
+                del data['compress_len'] 
 
                 self.replay_buffer.add_episode(data)
 
@@ -140,7 +169,8 @@ class Hdf5RealRobotDataset(BaseImageDataset):
         return val_set
 
     def get_normalizer(self, mode='limits', **kwargs):
-        data = self.replay_buffer #To Do
+        data = self.replay_buffer.data #To Do
+        data = {k: v for k, v in data.items() if "observation" not in k}
         if 'range_eps' not in kwargs:
             # to prevent blowing up dims that barely change
             kwargs['range_eps'] = 5e-2

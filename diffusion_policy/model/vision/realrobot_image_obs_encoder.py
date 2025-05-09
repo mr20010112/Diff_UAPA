@@ -11,7 +11,6 @@ from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
 class RealRobotImageObsEncoder(ModuleAttrMixin):
     def __init__(self,
             shape_meta: dict,
-            rgb_keys: list,
             rgb_model: Union[nn.Module, Dict[str,nn.Module]],
             resize_shape: Union[Tuple[int,int], Dict[str,tuple], None]=None,
             crop_shape: Union[Tuple[int,int], Dict[str,tuple], None]=None,
@@ -36,9 +35,9 @@ class RealRobotImageObsEncoder(ModuleAttrMixin):
 
 
         obs_shape_meta = shape_meta['obs']
+        rgb_keys = shape_meta['obs'].keys()
         for key, attr in obs_shape_meta.items():
             shape = tuple(attr['shape'])
-            type = attr.get('type', 'low_dim')
             key_shape_map[key] = shape
             # handle sharing vision backbone
             if share_rgb_model:
@@ -80,33 +79,33 @@ class RealRobotImageObsEncoder(ModuleAttrMixin):
                 )
                 input_shape = (shape[0],h,w)
 
-        # configure randomizer
-        this_randomizer = nn.Identity()
-        if crop_shape is not None:
-            if isinstance(crop_shape, dict):
-                h, w = crop_shape[key]
-            else:
-                h, w = crop_shape
-            if random_crop:
-                this_randomizer = CropRandomizer(
-                    input_shape=input_shape,
-                    crop_height=h,
-                    crop_width=w,
-                    num_crops=1,
-                    pos_enc=False
-                )
-            else:
-                this_normalizer = torchvision.transforms.CenterCrop(
-                    size=(h,w)
-                )
-        # configure normalizer
-        this_normalizer = nn.Identity()
-        if imagenet_norm:
-            this_normalizer = torchvision.transforms.Normalize(
-                mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        
-        this_transform = nn.Sequential(this_resizer, this_randomizer, this_normalizer)
-        key_transform_map[key] = this_transform
+            # configure randomizer
+            this_randomizer = nn.Identity()
+            if crop_shape is not None:
+                if isinstance(crop_shape, dict):
+                    h, w = crop_shape[key]
+                else:
+                    h, w = crop_shape
+                if random_crop:
+                    this_randomizer = CropRandomizer(
+                        input_shape=input_shape,
+                        crop_height=h,
+                        crop_width=w,
+                        num_crops=1,
+                        pos_enc=False
+                    )
+                else:
+                    this_normalizer = torchvision.transforms.CenterCrop(
+                        size=(h,w)
+                    )
+            # configure normalizer
+            this_normalizer = nn.Identity()
+            if imagenet_norm:
+                this_normalizer = torchvision.transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            
+            this_transform = nn.Sequential(this_resizer, this_randomizer, this_normalizer)
+            key_transform_map[key] = this_transform
 
         rgb_keys = sorted(rgb_keys)
 

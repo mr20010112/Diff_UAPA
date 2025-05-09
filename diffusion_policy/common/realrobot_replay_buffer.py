@@ -7,6 +7,7 @@ import numcodecs
 import numpy as np
 from functools import cached_property
 import cv2
+import concurrent.futures
 
 def check_chunks_compatible(chunks: tuple, shape: tuple):
     assert len(shape) == len(chunks)
@@ -568,27 +569,37 @@ class RealRobotReplayBuffer:
         original_action_shape = action.shape
         episode_len = original_action_shape[0]
         camera_keys = observations['images'].keys()
+        compress_len = data['compress_len']
 
-        observation_data = []
-        for key in observations:
-            if key != 'images':
-                observation_data.append(observations[key])
-        qpos = np.concatenate(observation_data, axis=-1)
+        # observation_data = []
+        # for key in observations:
+        #     if key != 'images':
+        #         observation_data.append(observations[key])
+        # qpos = np.concatenate(observation_data, axis=-1)
 
         # padded_action = np.zeros((self.max_steps, original_action_shape[1]), dtype=np.float32)
         # padded_action[:episode_len] = action
 
-        all_cam_images = []
+        def decode_image(data):
+            return cv2.imdecode(data, 1)
+
+        all_cam_images = {}
         for cam_name in camera_keys:
-            cam_images = observations['images'][cam_name]
-            all_cam_images.append(cv2.imdecode(cam_images, 1))
-        image_data = np.einsum('k h w c -> k c h w', all_cam_images)
-        image_data = image_data / 255.0
+            decompressed_images = []
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                results = executor.map(decode_image, observations['images'][cam_name][:compress_len])
+                decompressed_images = list(results)
+
+            decompressed_images = np.array(decompressed_images)
+            all_cam_images.update({cam_name: decompressed_images.astype(np.float32)})
+
+        # image_data = np.einsum('k h w c -> k c h w', all_cam_images)
+        # image_data = image_data / 255.0
     
         episode = {
-            'image': image_data.astype(np.float32),
+            'image': all_cam_images,
             'action': action.astype(np.float32),
-            'qpos': qpos.astype(np.float32),
+            # 'qpos': qpos.astype(np.float32),
         }
 
         return episode
