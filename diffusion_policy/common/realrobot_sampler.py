@@ -62,13 +62,13 @@ class RealRobotSequenceSampler:
         indices = np.where(self.episode_mask)[0]
         result = self.replay_buffer.get_episode(indices[idx])
 
-        for key in result:
-            value = result[key]
-            if isinstance(value, np.ndarray):
-                result[key] = torch.from_numpy(value)
-            elif isinstance(value, (np.float32, np.float64, float, int)):
-                result[key] = torch.tensor(value, dtype=torch.float32)
-            else:
-                raise TypeError(f"Unsupported type {type(value)} for key '{key}'")
+        # for key in result:
+        #     value = result[key]
+        #     if isinstance(value, np.ndarray):
+        #         result[key] = torch.from_numpy(value)
+        #     elif isinstance(value, (np.float32, np.float64, float, int)):
+        #         result[key] = torch.tensor(value, dtype=torch.float32)
+        #     else:
+        #         raise TypeError(f"Unsupported type {type(value)} for key '{key}'")
 
         return result

@@ -13,7 +13,12 @@ from diffusion_policy.common.realrobot_replay_buffer import RealRobotReplayBuffe
 from diffusion_policy.common.realrobot_sampler import RealRobotSequenceSampler, get_val_mask
 from diffusion_policy.model.common.normalizer import LinearNormalizer, SingleFieldLinearNormalizer
 from diffusion_policy.dataset.base_dataset import BaseImageDataset
-
+from diffusion_policy.common.normalize_util import (
+    get_range_normalizer_from_stat,
+    get_image_range_normalizer,
+    get_identity_normalizer_from_stat,
+    array_to_stats
+)
 
 
 class Hdf5RealRobotDataset(BaseImageDataset):
@@ -80,47 +85,18 @@ class Hdf5RealRobotDataset(BaseImageDataset):
             result = {}
             for key, item in h5_obj.items():
                 if isinstance(item, h5py.Dataset):
-                    # 如果是dataset，读出数据赋值
                     result[key] = item[()]
                 elif isinstance(item, h5py.Group):
-                    # 如果是group，递归调用
                     result[key] = h5_to_data(item)
             return result
-
-        def decode_image(data):
-            return cv2.imdecode(data, 1)
 
         for filename in tqdm(hdf5_files, desc='Processing HDF5 files'):
             file_path = os.path.join(dataset_dir, filename)
             with h5py.File(file_path, 'r') as f:
-                # observations = f['observations']
-                # action = f['action']
-                # original_action_shape = action.shape
-                # episode_len = original_action_shape[0]
-                # camera_keys = observations['images'].keys()
-
-                # for key in observations:
-                #     if key != 'images':
-                #         observation_data.append(observations[key])
-                # qpos = np.concatenate(observation_data, axis=-1)
-
-                # padded_action = np.zeros((self.max_steps, original_action_shape[1]), dtype=np.float32)
-                # padded_action[:episode_len] = action
-
-                # all_cam_images = []
-                # for cam_name in camera_keys:
-                #     all_cam_images.append(observations['images'][cam_name])
-                # all_cam_images = np.concatenate(all_cam_images, axis=0)
-                # image_data = np.einsum('k h w c -> k c h w', all_cam_images)
-                # image_data = image_data / 255.0
-            
-                # episode = {
-                #     'image': image_data.astype(np.float32),
-                #     'action': action.astype(np.float32),
-                #     'qpos': qpos.astype(np.float32),
-                # }
                 data = h5_to_data(f)
                 del data['compress_len']
+                del data['observations']['images']['cam_right'] #also need to be changed in config
+
                 for key in data['observations']['images'].keys():
                     image_data = data['observations']['images'][key]
                     save_length = image_data.shape[-1]
@@ -169,12 +145,18 @@ class Hdf5RealRobotDataset(BaseImageDataset):
 
     def get_normalizer(self, mode='limits', **kwargs):
         data = self.replay_buffer.data #To Do
-        data = {k: v for k, v in data.items() if "observation" not in k}
-        if 'range_eps' not in kwargs:
-            # to prevent blowing up dims that barely change
-            kwargs['range_eps'] = 5e-2
+        obs_keys = [k for k in data.keys() if "image" in k]
+
         normalizer = LinearNormalizer()
-        normalizer.fit(data=data, last_n_dims=1, mode=mode, **kwargs)
+
+        # action
+        normalizer['action'] = SingleFieldLinearNormalizer.create_fit(
+            self.replay_buffer.data['action'])
+        
+        for key in obs_keys:
+            key = key.replace("observations/images/", "")
+            normalizer[key] = get_image_range_normalizer()        
+
         return normalizer
 
     def get_all_actions(self) -> torch.Tensor:

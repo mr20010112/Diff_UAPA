@@ -1,16 +1,16 @@
 name: real_image
 
-image_shape: [3, 240, 320]
+image_shape: [3, 1024, 1280]
 dataset_path: data/realrobot/expert
 
 shape_meta: &shape_meta
 
   obs:
-    camera_left:
+    cam_left:
       shape: ${task.image_shape}
 
-    camera_right:
-      shape: ${task.image_shape}
+    # cam_right:
+    #   shape: ${task.image_shape} #also need to be changed in the dataset
 
   action: 
     shape: [21]
