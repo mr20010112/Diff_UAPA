@@ -1,14 +1,16 @@
 defaults:
   - _self_
-  - task: realrobot_pick
+  - task: pbrl_realrobot_pick
 
-name: train_diffusion_real_robot0
-_target_: diffusion_policy.workspace.train_diffusion_realrobot_workspace.TrainDiffusionRealRobotWorkspace
+name: train_diffusion_realrobot
+_target_: diffusion_policy.workspace.pbrl_diffusion_realrobot_online_type1_workspace.PbrlDiffusionRealRobotWorkspace #_type1_, _type2_
+# checkpoint_dir: 'data/experiments/low_dim/robomimic/transport/diff/base/epoch=0120-test_mean_score=0.540.ckpt'
 
-
+task_name: ${task.name}
 shape_meta: ${task.shape_meta}
 exp_name: "default"
 
+gamma: 1
 horizon: 16
 n_obs_steps: 2
 n_action_steps: 8
@@ -19,7 +21,7 @@ keypoint_visible_rate: 1.0
 obs_as_global_cond: True
 
 policy:
-  _target_: diffusion_policy.policy.diffusion_realrobot_policy.DiffusionRealRobotPolicy
+  _target_: diffusion_policy.policy.dpo_diffusion_realrobot_policy.DiffusionRealRobotPolicy
 
   shape_meta: ${shape_meta}
   
@@ -50,6 +52,10 @@ policy:
     share_rgb_model: False
     imagenet_norm: True
 
+  beta: 1.0
+  map_ratio: 1.0
+  bias_reg: 1.0
+  gamma: ${gamma}
   horizon: ${horizon}
   n_action_steps: ${eval:'${n_action_steps}+${n_latency_steps}'}
   n_obs_steps: ${n_obs_steps}
@@ -62,8 +68,6 @@ policy:
   n_groups: 8
   cond_predict_scale: True
 
-  # scheduler.step params
-  # predict_epsilon: True
 
 ema:
   _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
@@ -95,17 +99,20 @@ optimizer:
   weight_decay: 1.0e-6
 
 training:
-  device: "cuda:0"
+  device_cpu: "cpu"
+  device_gpu: "cuda:0"
   seed: 42
   debug: False
-  resume: True
+  resume: False #True
   # optimization
   lr_scheduler: cosine
+  # Transformer needs LR warmup
   lr_warmup_steps: 5
   num_epochs: 6
+  # lr_end: 1.0e-8
+  # power: 1.5
+  gradient_norm_clip: 0.5
   gradient_accumulate_every: 1
-  # EMA destroys performance when used with BatchNorm
-  # replace BatchNorm with GroupNorm.
   use_ema: True
   freeze_encoder: False
   # training loop control
@@ -119,13 +126,23 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
+  dataset_1_dir: ${task.dataset_1.dataset_dir}
+  dataset_2_dir: ${task.dataset_2.dataset_dir}
+  online:
+    num_groups: 4
+    reverse_ratio: 0.2
+    update_history: False
+  map:
+    use_map: False #True
+    map_ratio: 0.15
+
 
 logging:
   project: diffusion_policy_debug
   resume: True
   mode: online
-  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_real_robot
-  tags: ["${name}", "${exp_name}"]
+  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+  tags: ["${name}", "${task_name}", "${exp_name}"]
   id: null
   group: null
 
@@ -139,14 +156,14 @@ checkpoint:
   save_last_snapshot: False
 
 multi_run:
-  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_real_robot
-  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_real_robot
+  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
 
 hydra:
   job:
     override_dirname: ${name}
   run:
-    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_real_robot
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
   sweep:
-    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_real_robot
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
     subdir: ${hydra.job.num}

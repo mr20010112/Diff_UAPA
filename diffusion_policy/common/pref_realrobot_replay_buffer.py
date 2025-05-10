@@ -6,6 +6,8 @@ import zarr
 import numcodecs
 import numpy as np
 from functools import cached_property
+import cv2
+import concurrent.futures
 
 def check_chunks_compatible(chunks: tuple, shape: tuple):
     assert len(shape) == len(chunks)
@@ -80,7 +82,7 @@ def get_optimal_chunks(shape, dtype,
     # print(np.prod(chunks) * itemsize / target_chunk_bytes)
     return chunks
 
-class Pref_ImageReplayBuffer:
+class Pref_RealRobotReplayBuffer:
     """
     Zarr-based temporal data structure specifically for preference dataset.
     Stores pairs of trajectories (observations, actions) along with votes.
@@ -121,8 +123,6 @@ class Pref_ImageReplayBuffer:
                 'episode_ends': np.zeros((0,), dtype=np.int64),
                 'votes': np.zeros((0,), dtype=np.float32), 
                 'votes_2': np.zeros((0,), dtype=np.float32),
-                'length': np.zeros((0,), dtype=np.int64),
-                'length_2': np.zeros((0,), dtype=np.int64),
                 'beta_priori': np.zeros((0,), dtype=np.float32),
                 'beta_priori_2': np.zeros((0,), dtype=np.float32),
             }
@@ -163,7 +163,6 @@ class Pref_ImageReplayBuffer:
         episode_length = len(data['action'])
         new_len = curr_len + 1
 
-        # Add trajectory 1
         for key in data.keys():
             # Create the new shape to accommodate all time steps
             value = data[key]
@@ -189,48 +188,9 @@ class Pref_ImageReplayBuffer:
             arr[new_len-1, -value.shape[0]:, :] = value # Now this assumes data[key] has shape (T, dim)
 
 
-        # # Add trajectory 2 (obs_2, action_2)
-        # for key in ['agentview_image_2', 'robot0_eef_pos_2', 'robot0_eef_quat_2', 'robot0_gripper_qpos_2', 'robot0_eye_in_hand_image_2', 'action_2']:
-        #     value = data[key]
-        #     # Create the new shape to accommodate all time steps
-        #     new_shape = (new_len,) + (episode_length,) + data[key].shape[1:]  # This will set (new_len, T, dim)
-
-        #     if key not in self.root['data']:
-        #         # Create a new array if it doesn't exist
-        #         if is_zarr:
-        #             cks = self._resolve_array_chunks(chunks, key, data[key])
-        #             cpr = self._resolve_array_compressor(compressors, key, data[key])
-        #             arr = self.root['data'].zeros(name = key, shape=new_shape, chunks=cks, dtype=data[key].dtype, compressor=cpr)
-        #         else:
-        #             arr = np.zeros(new_shape, dtype=data[key].dtype)
-        #             self.root['data'][key] = arr
-        #     else:
-        #         arr = self.root['data'][key]
-        #         if is_zarr:
-        #             arr.resize(new_shape)
-        #         else:
-        #             arr.resize(new_shape, refcheck=False)
-
-        #     # Store the full sequence, adjusting the shape to match the time steps in data[key]
-        #     arr[new_len-1, -value.shape[0]:, :] = value  # Now this assumes data[key] has shape (T, dim)
-
         # Add votes to meta
         if meta_data:
             for key in ['votes', 'votes_2']:
-                new_shape = (new_len,) + (1,)
-                if key not in self.root['meta']:
-                    if is_zarr:
-                        self.root['meta'].zeros(name=key, shape=new_shape, chunks=new_shape, dtype=np.float32)
-                    else:
-                        self.root['meta'][key] = np.zeros(new_shape, dtype=np.float32)
-                arr = self.root['meta'][key]
-                if is_zarr:
-                    arr.resize(new_shape)
-                else:
-                    arr.resize(new_shape, refcheck=False)
-                arr[new_len-1] = meta_data[key]
-
-            for key in ['length', 'length_2']:
                 new_shape = (new_len,) + (1,)
                 if key not in self.root['meta']:
                     if is_zarr:
@@ -263,45 +223,103 @@ class Pref_ImageReplayBuffer:
         """
         Get a pair of episodes by index, including observation and action sequences for both trajectories.
         """
+
+        def decode_image(data):
+            return cv2.imdecode(data, 1)
+
         if copy:
+            data = self.root['data'].copy()
+            data = self.unflatten_dataset_dict(data)
+            action = data['action'][idx]
+            action_2 = data['action_2'][idx]
+            obs = data['obs']
+            obs_2 = data['obs_2']
+            camera_keys = obs['images'].keys()
+            compress_len = data['compress_len']
+            compress_len_2 = data['compress_len_2']
+            del data
+
+            all_cam_images = {}
+            for cam_name in camera_keys:
+                decompressed_images = []
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    results = executor.map(decode_image, \
+                                obs['images'][cam_name][idx, :int(compress_len[idx, 0])])
+                    decompressed_images = list(results)
+
+                decompressed_images = np.array(decompressed_images)
+                decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
+                decompressed_images = decompressed_images / 255.0
+                all_cam_images.update({cam_name: decompressed_images.astype(np.float32)})
+
+            all_cam_images_2 = {}
+            for cam_name in camera_keys:
+                decompressed_images = []
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    results = executor.map(decode_image, \
+                                obs_2['images'][cam_name][idx, :int(compress_len_2[idx, 0])])
+                    decompressed_images = list(results)
+
+                decompressed_images = np.array(decompressed_images)
+                decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
+                decompressed_images = decompressed_images / 255.0
+                all_cam_images_2.update({cam_name: decompressed_images.astype(np.float32)})
+
             return {
-                'agentview_image': self.root['data']['agentview_image'][idx].copy(),
-                'agentview_image_2': self.root['data']['agentview_image_2'][idx].copy(),
-                'robot0_eef_pos': self.root['data']['robot0_eef_pos'][idx].copy(),
-                'robot0_eef_pos_2': self.root['data']['robot0_eef_pos_2'][idx].copy(),
-                'robot0_eef_quat': self.root['data']['robot0_eef_quat'][idx].copy(),
-                'robot0_eef_quat_2': self.root['data']['robot0_eef_quat_2'][idx].copy(),
-                'robot0_gripper_qpos': self.root['data']['robot0_gripper_qpos'][idx].copy(),
-                'robot0_gripper_qpos_2': self.root['data']['robot0_gripper_qpos_2'][idx].copy(),
-                'robot0_eye_in_hand_image': self.root['data']['robot0_eye_in_hand_image'][idx].copy(),
-                'robot0_eye_in_hand_image_2': self.root['data']['robot0_eye_in_hand_image_2'][idx].copy(),
-                'action': self.root['data']['action'][idx].copy(),
-                'action_2': self.root['data']['action_2'][idx].copy(),
+                'obs': all_cam_images,
+                'obs_2': all_cam_images_2,
+                'action': action.astype(np.float32),
+                'action_2': action_2.astype(np.float32),
                 'votes': self.root['meta']['votes'][idx].copy(),
                 'votes_2': self.root['meta']['votes_2'][idx].copy(),
-                'length': self.root['meta']['length'][idx].copy(),
-                'length_2': self.root['meta']['length_2'][idx].copy(),
                 'beta_priori': self.root['meta']['beta_priori'][idx].copy(),
                 'beta_priori_2': self.root['meta']['beta_priori_2'][idx].copy(),
             }
         else:
+            data = self.root['data']
+            data = self.unflatten_dataset_dict(data)
+            action = data['action'][idx]
+            action_2 = data['action_2'][idx]
+            obs = data['obs']
+            obs_2 = data['obs_2']
+            camera_keys = obs['images'].keys()
+            compress_len = data['compress_len']
+            compress_len_2 = data['compress_len_2']
+            del data
+
+            all_cam_images = {}
+            for cam_name in camera_keys:
+                decompressed_images = []
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    results = executor.map(decode_image, \
+                                obs['images'][cam_name][idx, :, :int(compress_len[idx, 0, 0])])
+                    decompressed_images = list(results)
+
+                decompressed_images = np.array(decompressed_images)
+                decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
+                decompressed_images = decompressed_images / 255.0
+                all_cam_images.update({cam_name: decompressed_images.astype(np.float32)})
+
+            all_cam_images_2 = {}
+            for cam_name in camera_keys:
+                decompressed_images = []
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    results = executor.map(decode_image, \
+                                obs_2['images'][cam_name][idx, :, :int(compress_len[idx, 0, 0])])
+                    decompressed_images = list(results)
+
+                decompressed_images = np.array(decompressed_images)
+                decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
+                decompressed_images = decompressed_images / 255.0
+                all_cam_images_2.update({cam_name: decompressed_images.astype(np.float32)})
+
             return {
-                'agentview_image': self.root['data']['agentview_image'][idx],
-                'agentview_image_2': self.root['data']['agentview_image_2'][idx],
-                'robot0_eef_pos': self.root['data']['robot0_eef_pos'][idx],
-                'robot0_eef_pos_2': self.root['data']['robot0_eef_pos_2'][idx],
-                'robot0_eef_quat': self.root['data']['robot0_eef_quat'][idx],
-                'robot0_eef_quat_2': self.root['data']['robot0_eef_quat_2'][idx],
-                'robot0_gripper_qpos': self.root['data']['robot0_gripper_qpos'][idx],
-                'robot0_gripper_qpos_2': self.root['data']['robot0_gripper_qpos_2'][idx],
-                'robot0_eye_in_hand_image': self.root['data']['robot0_eye_in_hand_image'][idx],
-                'robot0_eye_in_hand_image_2': self.root['data']['robot0_eye_in_hand_image_2'][idx],
-                'action': self.root['data']['action'][idx],
-                'action_2': self.root['data']['action_2'][idx],
+                'obs': all_cam_images,
+                'obs_2': all_cam_images_2,
+                'action': action.astype(np.float32),
+                'action_2': action_2.astype(np.float32),
                 'votes': self.root['meta']['votes'][idx],
                 'votes_2': self.root['meta']['votes_2'][idx],
-                'length': self.root['meta']['length'][idx],
-                'length_2': self.root['meta']['length_2'][idx],
                 'beta_priori': self.root['meta']['beta_priori'][idx],
                 'beta_priori_2': self.root['meta']['beta_priori_2'][idx],
             }
@@ -311,6 +329,19 @@ class Pref_ImageReplayBuffer:
         Get the slice range for an episode based on the index for slicing observation and action arrays.
         """
         return slice(idx, idx + 1)
+
+    def unflatten_dataset_dict(self, flat_dict, delimiter='/'):
+        result = {}
+        for compound_key, value in flat_dict.items():
+            keys = compound_key.split(delimiter)
+            current = result
+            for key in keys[:-1]:
+                if key not in current:
+                    current[key] = {}
+                current = current[key]
+            current[keys[-1]] = value
+        
+        return result
 
     # ============= Save methods ===============
     def save_to_store(self, store, chunks: Optional[Dict[str, tuple]] = dict(),

@@ -1,0 +1,50 @@
+name: real_image
+
+image_shape: [3, 1024, 1280]
+
+shape_meta: &shape_meta
+
+  obs:
+    cam_left:
+      shape: ${task.image_shape}
+
+    # cam_right:
+    #   shape: ${task.image_shape} #also need to be changed in the dataset
+
+  action: 
+    shape: [14]
+
+origin_dataset:
+  _target_: diffusion_policy.dataset.realrobot_dataset.Hdf5RealRobotDataset
+  dataset_dir: data/realrobot/expert
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.00
+
+dataset_1:
+  _target_: diffusion_policy.dataset.realrobot_normal_dataset.Hdf5RealRobotDataset
+  dataset_dir: data/realrobot/expert
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.00
+
+dataset_2:
+  _target_: diffusion_policy.dataset.realrobot_normal_dataset.Hdf5RealRobotDataset
+  dataset_dir: data/realrobot/normal
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.00
+
+pref_dataset:
+  _target_: diffusion_policy.dataset.rlhf_realrobot_dataset.RLHF_RealRobotDataset
+  sequence_length: 50 #${task.env_runner.max_steps}
+  val_ratio: 0
+  N: 500
+  gamma: ${gamma}
+  gpu_device: ${training.device_gpu}

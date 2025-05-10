@@ -19,8 +19,6 @@ import wandb
 import tqdm
 import numpy as np
 import shutil
-import math
-import scipy.stats as stats
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 from diffusion_policy.policy.diffusion_realrobot_policy import DiffusionRealRobotPolicy
 from diffusion_policy.dataset.base_dataset import BaseImageDataset
@@ -54,7 +52,8 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
             self.ema_model = copy.deepcopy(self.model)
 
         # configure training state
-        self.optimizer = self.model.get_optimizer(**cfg.optimizer)
+        self.optimizer = hydra.utils.instantiate(
+            cfg.optimizer, params=self.model.parameters())
 
         # configure training state
         self.global_step = 0
@@ -69,7 +68,8 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
             if ckpt_path.is_file():
                 print(f"Resuming from checkpoint {ckpt_path}")
                 self.load_checkpoint(path=ckpt_path)
-            self.optimizer = self.model.get_optimizer(**cfg.optimizer)
+            self.optimizer = self.optimizer = hydra.utils.instantiate( \
+                cfg.optimizer, params=self.model.parameters())
             self.global_step = 0
             self.epoch = 0
 
@@ -84,99 +84,59 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
         # configure dataset
         dataset: BaseImageDataset
         dataset = hydra.utils.instantiate(cfg.task.origin_dataset)
-        assert isinstance(dataset, BaseImageDataset)
-        train_dataloader = DataLoader(dataset, **cfg.dataloader)
+        # assert isinstance(dataset, BaseImageDataset)
+        # train_dataloader = DataLoader(dataset, **cfg.dataloader)
         normalizer = dataset.get_normalizer()
+        del dataset
+
+        # configure validation dataset
+        #val_dataset = dataset.get_validation_dataset()
+        #val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
 
         self.model.set_normalizer(normalizer)
         if cfg.training.use_ema:
             self.ema_model.set_normalizer(normalizer)
 
-        # # configure dataset
-        # dataset_1: BaseLowdimDataset
-        # dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
-        # #device = torch.device(cfg.training.device_cpu)
-        # assert isinstance(dataset_1, BaseLowdimDataset)
+        # configure dataset
+        dataset_1: BaseImageDataset
+        dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
+        #device = torch.device(cfg.training.device_cpu)
+        assert isinstance(dataset_1, BaseImageDataset)
 
-        # # configure dataset
-        # dataset_2: BaseLowdimDataset
-        # dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
-        # # expert_normalizer = normal_dataset.get_normalizer()
-        # assert isinstance(dataset_2, BaseLowdimDataset)
+        # configure dataset
+        dataset_2: BaseImageDataset
+        dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
+        # expert_normalizer = normal_dataset.get_normalizer()
+        assert isinstance(dataset_2, BaseImageDataset)
 
         pref_dataset: BaseImageDataset
-        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, dataset_1=dataset, \
-                                               dataset_2=dataset) #cfg.task.perf_dataset
+        pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, dataset_1=dataset_1, \
+                                               dataset_2=dataset_2) 
 
         # cut online groups
         votes_1, votes_2 = pref_dataset.pref_replay_buffer.meta['votes'], pref_dataset.pref_replay_buffer.meta['votes_2']
 
-        # normalization votes
-        votes_concat = np.concatenate((votes_1, votes_2), axis=1)
-        votes_mean = votes_concat.mean()
-        votes_std = votes_concat.std()
+        n = votes_1.shape[0]
+        exchange_count = int(n * 0.2)
 
-        votes_1 = np.clip(votes_1, votes_mean - 3 * votes_std, votes_mean + 3 * votes_std)
-        votes_2 = np.clip(votes_2, votes_mean - 3 * votes_std, votes_mean + 3 * votes_std)
+        indices = np.random.choice(n, exchange_count, replace=False)
 
-        votes_concat = np.concatenate((votes_1, votes_2), axis=1)
-        votes_mean = votes_concat.mean()
-        votes_std = votes_concat.std()
+        votes_1_new = votes_1.copy()
+        votes_2_new = votes_2.copy()
 
-        votes_1 = (votes_1 - votes_mean) / (votes_std + 1e-8)
-        votes_2 = (votes_2 - votes_mean) / (votes_std + 1e-8)
+        temp = votes_1_new[indices].copy()
+        votes_1_new[indices] = votes_2_new[indices]
+        votes_2_new[indices] = temp
 
-        votes_concat = np.concatenate((votes_1, votes_2), axis=1)
-        votes_min = votes_concat.min()
-        votes_max = votes_concat.max()
-
-        votes_1_norm = (votes_1 - votes_min) / (votes_max - votes_min + 1e-8)
-        votes_2_norm = (votes_2 - votes_min) / (votes_max - votes_min + 1e-8)
-
-        scale_factor = 5
-        votes_1 = votes_1_norm * scale_factor
-        votes_2 = votes_2_norm * scale_factor
-
-        #select uncertain samples
-        var = (votes_1 * votes_2) / (((votes_1 + votes_2 + 1e-6) ** 2) * (votes_1 + votes_2 + 1))
-        mask = (votes_1 + votes_2) != 0
-        var_masked = var[mask]
-        var_flat = var_masked.flatten()
-        count = int(len(var_flat) * cfg.training.online.reverse_ratio)
-        threshold = np.partition(var_flat, -count)[-count]
-        masked_indices = np.where(var_flat >= threshold)[0]
-        original_indices = np.where(mask.flatten())[0]
-        indices = original_indices[masked_indices]
-        ratio_1, ratio_2 = votes_1 / (votes_1 + votes_2), votes_2 / (votes_1 + votes_2)
-
-        all_votes_1 = np.array([np.round(ratio_1 * (cfg.training.online.all_votes / cfg.training.online.num_groups)) for _ in range(cfg.training.online.num_groups)])
-        all_votes_2 = np.array([np.round(ratio_2 * (cfg.training.online.all_votes / cfg.training.online.num_groups)) for _ in range(cfg.training.online.num_groups)])
-
-
-        # add noise to votes
-        for local_epoch_idx in range(cfg.training.online.num_groups):
-            if local_epoch_idx % cfg.training.online.reverse_freq == 0:
-                # delta = np.round(cfg.training.online.all_votes / cfg.training.online.num_groups * cfg.training.online.reverse_rate)
-                X = stats.truncnorm(-3, 3, loc=cfg.training.online.reverse_rate, scale=cfg.training.online.reverse_rate/3)
-                noise_ratio = X.rvs(all_votes_1.shape[1])
-                noise_ratio = noise_ratio.reshape(-1, 1)
-
-                # condiction = (all_votes_1[local_epoch_idx] > all_votes_2[local_epoch_idx])
-                all_votes_1[local_epoch_idx][indices], all_votes_2[local_epoch_idx][indices] = all_votes_1[local_epoch_idx][indices] + np.round((all_votes_2[local_epoch_idx][indices] - all_votes_1[local_epoch_idx][indices]) * noise_ratio[indices]), \
-                                                                            all_votes_2[local_epoch_idx][indices] + np.round((all_votes_1[local_epoch_idx][indices] - all_votes_2[local_epoch_idx][indices]) * noise_ratio[indices])
-                
-
-                all_votes_1[local_epoch_idx] = np.maximum(all_votes_1[local_epoch_idx], 0)
-                all_votes_2[local_epoch_idx] = np.maximum(all_votes_2[local_epoch_idx], 0)
+        votes_1 = votes_1_new
+        votes_2 = votes_2_new
 
         if cfg.training.map.use_map:    
-            init_votes_1 = np.sum(all_votes_1, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
-            init_votes_2 = np.sum(all_votes_2, axis=0, keepdims=True).T / (cfg.training.online.all_votes / 5)
 
-            pref_dataset.pref_replay_buffer.meta['votes'] = init_votes_1.reshape(-1, 1)
-            pref_dataset.pref_replay_buffer.meta['votes_2'] = init_votes_2.reshape(-1, 1)
-            pref_dataset.pref_replay_buffer.root['meta']['votes'] = init_votes_1.reshape(-1, 1)
-            pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = init_votes_2.reshape(-1, 1)
+            pref_dataset.pref_replay_buffer.meta['votes'] = votes_1.reshape(-1, 1)
+            pref_dataset.pref_replay_buffer.meta['votes_2'] = votes_2.reshape(-1, 1)
+            pref_dataset.pref_replay_buffer.root['meta']['votes'] = votes_1.reshape(-1, 1)
+            pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = votes_2.reshape(-1, 1)
 
             pref_dataset.set_beta_priori(data_size=100, policy=self.model)
             pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=50, warm_up_epochs=5, batch_size=5, lr=2.0e-5)
@@ -204,13 +164,6 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
                 cfg.ema,
                 model=self.ema_model)
 
-        # configure env
-        env_runner: BaseImageRunner
-        env_runner = hydra.utils.instantiate(
-            cfg.task.env_runner,
-            output_dir=self.output_dir)
-        assert isinstance(env_runner, BaseImageRunner)
-
         # configure logging
         wandb_run = wandb.init(
             dir=str(self.output_dir),
@@ -235,7 +188,7 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
         if self.ema_model is not None:
             self.ema_model.to(device)
         optimizer_to(self.optimizer, device)
-        
+
         # save batch for sampling
         train_sampling_batch = None
 
@@ -249,23 +202,32 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
             cfg.training.sample_every = 1
 
         # training loop
-        device = torch.device(cfg.training.device_gpu)
         log_path = os.path.join(self.output_dir, 'logs.json.txt')
         with JsonLogger(log_path) as json_logger:
             for online_epoch_idx in range(cfg.training.online.num_groups):
                 print(f"Round {online_epoch_idx + 1} of {cfg.training.online.num_groups} for online training")
 
-                local_votes_1 = np.array(all_votes_1[online_epoch_idx].T, dtype=np.float32).reshape(-1, 1)
-                local_votes_2 = np.array(all_votes_2[online_epoch_idx].T, dtype=np.float32).reshape(-1, 1)
+                n = votes_1.shape[0]
+                exchange_count = int(n * 0.2)
 
-                pref_dataset.pref_replay_buffer.meta['votes'] = local_votes_1
-                pref_dataset.pref_replay_buffer.meta['votes_2'] = local_votes_2
-                pref_dataset.pref_replay_buffer.root['meta']['votes'] = local_votes_1
-                pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = local_votes_2
+                indices = np.random.choice(n, exchange_count, replace=False)
+
+                votes_1_locoal = votes_1.copy()
+                votes_2_locoal = votes_2.copy()
+
+                temp = votes_1_locoal[indices].copy()
+                votes_1_locoal[indices] = votes_2_locoal[indices]
+                votes_2_locoal[indices] = temp
+
+                pref_dataset.pref_replay_buffer.meta['votes'] =  votes_1_locoal
+                pref_dataset.pref_replay_buffer.meta['votes_2'] = votes_2_locoal
+                pref_dataset.pref_replay_buffer.root['meta']['votes'] =  votes_1_locoal
+                pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = votes_2_locoal
 
                 train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
 
-                self.optimizer = self.model.get_optimizer(**cfg.optimizer)
+                self.optimizer = self.optimizer = hydra.utils.instantiate( \
+                    cfg.optimizer, params=self.model.parameters())
 
                 lr_scheduler = get_scheduler(
                     cfg.training.lr_scheduler,
@@ -277,11 +239,13 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
                     last_epoch=-1,
                 )
 
-                obs_keys = dataset.lowdim_keys + dataset.rgb_keys
-
                 for local_epoch_idx in range(cfg.training.num_epochs):
                     step_log = dict()
                     # ========= train for this epoch ==========
+                    if cfg.training.freeze_encoder:
+                        self.model.obs_encoder.eval()
+                        self.model.obs_encoder.requires_grad_(False)
+
                     train_losses = list()
                     with tqdm.tqdm(train_dataloader, desc=f"Training epoch {self.epoch}", 
                             leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
@@ -292,12 +256,12 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
                                 train_sampling_batch = batch
 
                             # compute loss
+                            stride = int(self.model.horizon / 2) #2*self.model.n_obs_steps
                             avg_traj_loss = 0.0
-                            stride = 2*self.model.n_obs_steps
                             if cfg.training.map.use_map:
-                                avg_traj_loss = compute_all_traj_image_loss(obs_keys=obs_keys, replay_buffer = pref_dataset.pref_replay_buffer, \
+                                avg_traj_loss = compute_all_traj_image_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
                                                                       model = self.model, ref_model = ref_policy.model, stride=stride)
-                            raw_loss = self.model.compute_loss(batch, obs_keys=obs_keys, stride=stride)
+                            raw_loss = self.model.compute_loss(batch, stride=stride, ref_model=ref_policy)
                             loss = raw_loss / cfg.training.gradient_accumulate_every
                             loss.backward()
 
@@ -344,32 +308,26 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
                         policy = self.ema_model
                     policy.eval()
 
-                    # run rollout
-                    if (self.epoch % cfg.training.rollout_every) == 0:
-                        runner_log = env_runner.run(policy)
-                        # log all
-                        step_log.update(runner_log)
-
-
-                    # run diffusion sampling on a training batch
-                    if (self.epoch % cfg.training.sample_every) == 0:
-                        with torch.no_grad():
-                            # sample trajectory from training set, and evaluate difference
-                            batch = dict_apply(train_sampling_batch, lambda x: x.to(device, non_blocking=True))
-                            obs_dict = {key:batch[key][:, :self.model.horizon, ...] for key in obs_keys}
-                            gt_action = batch['action'][:, :self.model.horizon, ...]
-                            obs_dict_2 = {key:batch[f'{key}_2'][:, :self.model.horizon, ...] for key in obs_keys}
-                            gt_action_2 = batch['action_2'][:, :self.model.horizon, ...]
+                    # # run diffusion sampling on a training batch
+                    # if (self.epoch % cfg.training.sample_every) == 0:
+                    #     with torch.no_grad():
+                    #         # sample trajectory from training set, and evaluate difference
+                    #         batch = dict_apply(train_sampling_batch, lambda x: x.to(device, non_blocking=True))
+                    #         obs_dict = batch['obs']
+                    #         for key in obs_dict.keys():
+                    #             obs_dict[key] = obs_dict[key][:, :self.model.n_obs_steps, ...]
+                    #         gt_action = batch['action'][:, self.model.n_obs_steps:self.model.n_obs_steps+self.model.n_action_steps, ...]
                             
-                            result = policy.predict_action(obs_dict)
-                            result_2 = policy.predict_action(obs_dict_2)
-                            pred_action = result['action_pred']
-                            pred_action_2 = result_2['action_pred']
-                            mse = torch.nn.functional.mse_loss(pred_action, gt_action)
-                            mse_2 = torch.nn.functional.mse_loss(pred_action_2, gt_action_2)
-                            step_log['train_action_mse_error'] = (mse.item()+mse_2.item())/2
-                            del batch, obs_dict, gt_action, result, pred_action, mse
-                            del obs_dict_2, gt_action_2, result_2, pred_action_2, mse_2
+                    #         result = policy.predict_action(obs_dict)
+                    #         pred_action = result['action_pred']
+                    #         mse = torch.nn.functional.mse_loss(pred_action, gt_action)
+                    #         step_log['train_action_mse_error'] = mse.item()
+                    #         del batch
+                    #         del obs_dict
+                    #         del gt_action
+                    #         del result
+                    #         del pred_action
+                    #         del mse
                     
                     # checkpoint
                     if (self.epoch % cfg.training.checkpoint_every) == 0:
@@ -407,7 +365,7 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")), 
     config_name=pathlib.Path(__file__).stem)
 def main(cfg):
-    workspace = PbrlDiffusionTransformerHybridWorkspace(cfg)
+    workspace = PbrlDiffusionRealRobotWorkspace(cfg)
     workspace.run()
 
 if __name__ == "__main__":

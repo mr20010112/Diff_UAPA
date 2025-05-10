@@ -325,7 +325,7 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         )
         return optimizer
 
-    def compute_loss(self, batch, obs_keys, ref_model: TransformerForDiffusion=None, avg_traj_loss=0.0, stride=1):
+    def compute_loss(self, batch, obs_keys, ref_model: TransformerForDiffusion, avg_traj_loss=0.0, stride=1):
         
         observations_1 = {key:batch[key].to(self.device) for key in obs_keys}
         actions_1 = batch["action"].to(self.device)
