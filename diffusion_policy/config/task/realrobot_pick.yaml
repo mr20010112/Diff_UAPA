@@ -13,7 +13,7 @@ shape_meta: &shape_meta
     #   shape: ${task.image_shape} #also need to be changed in the dataset
 
   action: 
-    shape: [21]
+    shape: [14]
 
 dataset:
   _target_: diffusion_policy.dataset.realrobot_dataset.Hdf5RealRobotDataset

@@ -97,6 +97,8 @@ class Hdf5RealRobotDataset(BaseImageDataset):
                 del data['compress_len']
                 del data['observations']['images']['cam_right'] #also need to be changed in config
 
+                data['action'] = data['action'][:, :14]
+
                 for key in data['observations']['images'].keys():
                     image_data = data['observations']['images'][key]
                     save_length = image_data.shape[-1]

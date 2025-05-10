@@ -44,7 +44,7 @@ policy:
       name: resnet18
       weights: null
     resize_shape: [1024, 1280]
-    crop_shape: [922, 1152] # ch, cw 240x320 90%
+    crop_shape: [922, 1152] # ch, cw 90%
     random_crop: False #True
     use_group_norm: False #True
     share_rgb_model: False
@@ -101,8 +101,8 @@ training:
   resume: True
   # optimization
   lr_scheduler: cosine
-  lr_warmup_steps: 50
-  num_epochs: 60
+  lr_warmup_steps: 5
+  num_epochs: 6
   gradient_accumulate_every: 1
   # EMA destroys performance when used with BatchNorm
   # replace BatchNorm with GroupNorm.
@@ -110,8 +110,8 @@ training:
   freeze_encoder: False
   # training loop control
   # in epochs
-  rollout_every: 10
-  checkpoint_every: 10
+  rollout_every: 1
+  checkpoint_every: 1
   val_every: 1
   sample_every: 5
   # steps per epoch
