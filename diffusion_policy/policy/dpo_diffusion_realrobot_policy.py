@@ -205,37 +205,16 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
         for param in ref_model.parameters():
             param.requires_grad = False
 
-        obs = batch['obs']
-        action = batch['action']
-        obs_2 = batch['obs_2']
-        action_2 = batch['action_2']
-
-        batch_size = action.shape[0]
+        batch_size = batch['action'].shape[0]
         horizon = self.horizon
-        for key in obs.keys():
-            obs[key] = slice_episode(obs[key], horizon, stride)
-            obs_2[key] = slice_episode(obs_2[key], horizon, stride)
-        action = slice_episode(action, horizon, stride)
-        action_2 = slice_episode(action_2, horizon, stride)
-
-        total_loss = 0
-        traj_loss = 0
-        traj_loss_2 = 0
-
-        for i in range(len(action)):
-            obs_slide = {}
-            for key in obs.keys():
-                obs_slide[key] = obs[key][i]
-            action_slide = action[i]
-
-            nobs = self.normalizer.normalize(obs_slide)
-            nactions = self.normalizer['action'].normalize(action_slide)
-
-            # handle different ways of passing observation
+        
+        def process_batch_data(obs, action):
+            nobs = self.normalizer.normalize(obs)
+            nactions = self.normalizer['action'].normalize(action)
+            
             local_cond = None
             global_cond = None
-            trajectory = nactions
-            cond_data = trajectory
+            
             if self.obs_as_global_cond:
                 # reshape B, T, ... to B*T
                 this_nobs = dict_apply(nobs, 
@@ -243,6 +222,8 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
                 nobs_features = self.obs_encoder(this_nobs)
                 # reshape back to B, Do
                 global_cond = nobs_features.reshape(batch_size, -1)
+                trajectory = nactions
+                cond_data = trajectory
             else:
                 # reshape B, T, ... to B*T
                 this_nobs = dict_apply(nobs, lambda x: x.reshape(-1, *x.shape[2:]))
@@ -251,33 +232,25 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
                 nobs_features = nobs_features.reshape(batch_size, horizon, -1)
                 cond_data = torch.cat([nactions, nobs_features], dim=-1)
                 trajectory = cond_data.detach()
-
-            # generate impainting mask
+                
             condition_mask = self.mask_generator(trajectory.shape)
-
-            # Sample noise that we'll add to the images
+            
             noise = torch.randn(trajectory.shape, device=trajectory.device)
-            bsz = trajectory.shape[0]
-            # Sample a random timestep for each image
+            
             timesteps = torch.randint(
                 0, self.noise_scheduler.config.num_train_timesteps, 
-                (bsz,), device=trajectory.device
+                (batch_size,), device=trajectory.device
             ).long()
-            # Add noise to the clean images according to the noise magnitude at each timestep
-            # (this is the forward diffusion process)
-            noisy_trajectory = self.noise_scheduler.add_noise(
-                trajectory, noise, timesteps)
             
-            # compute loss mask
+            noisy_trajectory = self.noise_scheduler.add_noise(trajectory, noise, timesteps)
+            
             loss_mask = ~condition_mask
-
-            # apply conditioning
+            
             noisy_trajectory[condition_mask] = cond_data[condition_mask]
             
-            # Predict the noise residual
             pred = self.model(noisy_trajectory, timesteps, 
                 local_cond=local_cond, global_cond=global_cond)
-
+            
             pred_type = self.noise_scheduler.config.prediction_type 
             if pred_type == 'epsilon':
                 target = noise
@@ -285,97 +258,31 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
                 target = trajectory
             else:
                 raise ValueError(f"Unsupported prediction type {pred_type}")
-
+            
             loss = F.mse_loss(pred, target, reduction='none')
             loss = loss * loss_mask.type(loss.dtype)
             loss = reduce(loss, 'b t ... -> b t (...)', 'mean')
-            # loss = loss.mean(dim=-1)
-            traj_loss += loss
-
-        for i in range(len(action_2)):
-            obs_slide = {}
-            for key in obs_2.keys():
-                obs_slide[key] = obs_2[key][i]
-            action_slide = action_2[i]
-
-            nobs = self.normalizer.normalize(obs_slide)
-            nactions = self.normalizer['action'].normalize(action_slide)
-
-            # handle different ways of passing observation
-            local_cond = None
-            global_cond = None
-            trajectory = nactions
-            cond_data = trajectory
-            if self.obs_as_global_cond:
-                # reshape B, T, ... to B*T
-                this_nobs = dict_apply(nobs, 
-                    lambda x: x[:,:self.n_obs_steps,...].reshape(-1,*x.shape[2:]))
-                nobs_features = self.obs_encoder(this_nobs)
-                # reshape back to B, Do
-                global_cond = nobs_features.reshape(batch_size, -1)
-            else:
-                # reshape B, T, ... to B*T
-                this_nobs = dict_apply(nobs, lambda x: x.reshape(-1, *x.shape[2:]))
-                nobs_features = self.obs_encoder(this_nobs)
-                # reshape back to B, T, Do
-                nobs_features = nobs_features.reshape(batch_size, horizon, -1)
-                cond_data = torch.cat([nactions, nobs_features], dim=-1)
-                trajectory = cond_data.detach()
-
-            # generate impainting mask
-            condition_mask = self.mask_generator(trajectory.shape)
-
-            # Sample noise that we'll add to the images
-            noise = torch.randn(trajectory.shape, device=trajectory.device)
-            bsz = trajectory.shape[0]
-            # Sample a random timestep for each image
-            timesteps = torch.randint(
-                0, self.noise_scheduler.config.num_train_timesteps, 
-                (bsz,), device=trajectory.device
-            ).long()
-            # Add noise to the clean images according to the noise magnitude at each timestep
-            # (this is the forward diffusion process)
-            noisy_trajectory = self.noise_scheduler.add_noise(
-                trajectory, noise, timesteps)
             
-            # compute loss mask
-            loss_mask = ~condition_mask
-
-            # apply conditioning
-            noisy_trajectory[condition_mask] = cond_data[condition_mask]
+            traj_loss = torch.sum(loss, dim=-1)
             
-            # Predict the noise residual
-            pred = self.model(noisy_trajectory, timesteps, 
-                local_cond=local_cond, global_cond=global_cond)
-
-            pred_type = self.noise_scheduler.config.prediction_type 
-            if pred_type == 'epsilon':
-                target = noise
-            elif pred_type == 'sample':
-                target = trajectory
-            else:
-                raise ValueError(f"Unsupported prediction type {pred_type}")
-
-            loss_2 = F.mse_loss(pred, target, reduction='none')
-            loss_2 = loss_2 * loss_mask.type(loss.dtype)
-            loss_2 = reduce(loss_2, 'b t ... -> b t (...)', 'mean')
-            # loss_2 = loss_2.mean(dim=-1)
-            traj_loss_2 += loss_2
-
-        traj_loss = torch.sum(traj_loss, dim=-1)
-        traj_loss_2 = torch.sum(traj_loss_2, dim=-1)
-        immitation_loss = (traj_loss + traj_loss_2)
-
-        traj_loss = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss
-
-        traj_loss_2 = -self.beta * self.noise_scheduler.config.num_train_timesteps * traj_loss_2
-        immitation_loss = -torch.mean(immitation_loss) / (self.horizon * (len(action)+len(action_2)))
-                
-        diff_loss = torch.mean(torch.abs(traj_loss - traj_loss_2 + immitation_loss))
-
-        mle_loss_1 = -F.logsigmoid(traj_loss - traj_loss_2 + immitation_loss)
-
-        total_loss += mle_loss_1   
-
-
-        return torch.mean(total_loss)
+            del noise, noisy_trajectory, pred, target, loss, loss_mask
+            torch.cuda.empty_cache()
+            
+            return traj_loss
+        
+        traj_loss = process_batch_data(batch['obs'], batch['action'])
+        
+        traj_loss_2 = process_batch_data(batch['obs_2'], batch['action_2'])
+        
+        total_actions = batch['action'].size(0) + batch['action_2'].size(0)
+        scale_factor = self.beta * self.noise_scheduler.config.num_train_timesteps
+        
+        immitation_loss = torch.mean(traj_loss + traj_loss_2) / (self.horizon * total_actions)
+        
+        traj_loss = -scale_factor * traj_loss
+        traj_loss_2 = -scale_factor * traj_loss_2
+        
+        diff_term = traj_loss - traj_loss_2 + immitation_loss
+        mle_loss = -F.logsigmoid(diff_term)
+        
+        return torch.mean(mle_loss)

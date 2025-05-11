@@ -96,6 +96,7 @@ class Hdf5RealRobotDataset(BaseImageDataset):
                 data = h5_to_data(f)
                 del data['compress_len']
                 del data['observations']['images']['cam_right'] #also need to be changed in config
+                del data['observations']['hand_pose']
 
                 data['action'] = data['action'][:, :14]
 

@@ -111,25 +111,11 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
 
         pref_dataset: BaseImageDataset
         pref_dataset = hydra.utils.instantiate(cfg.task.pref_dataset, dataset_1=dataset_1, \
-                                               dataset_2=dataset_2) 
+                                               dataset_2=dataset_2)
+        del dataset_1, dataset_2
 
         # cut online groups
         votes_1, votes_2 = pref_dataset.pref_replay_buffer.meta['votes'], pref_dataset.pref_replay_buffer.meta['votes_2']
-
-        n = votes_1.shape[0]
-        exchange_count = int(n * 0.2)
-
-        indices = np.random.choice(n, exchange_count, replace=False)
-
-        votes_1_new = votes_1.copy()
-        votes_2_new = votes_2.copy()
-
-        temp = votes_1_new[indices].copy()
-        votes_1_new[indices] = votes_2_new[indices]
-        votes_2_new[indices] = temp
-
-        votes_1 = votes_1_new
-        votes_2 = votes_2_new
 
         if cfg.training.map.use_map:    
 
@@ -208,8 +194,7 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
                 print(f"Round {online_epoch_idx + 1} of {cfg.training.online.num_groups} for online training")
 
                 n = votes_1.shape[0]
-                exchange_count = int(n * 0.2)
-
+                exchange_count = int(votes_1.shape[0] * cfg.training.online.reverse_ratio)
                 indices = np.random.choice(n, exchange_count, replace=False)
 
                 votes_1_locoal = votes_1.copy()
@@ -256,12 +241,11 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
                                 train_sampling_batch = batch
 
                             # compute loss
-                            stride = int(self.model.horizon) #2*self.model.n_obs_steps
                             avg_traj_loss = 0.0
                             if cfg.training.map.use_map:
                                 avg_traj_loss = compute_all_traj_image_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
-                                                                      model = self.model, ref_model = ref_policy.model, stride=stride)
-                            raw_loss = self.model.compute_loss(batch, stride=stride, ref_model=ref_policy)
+                                                                      model = self.model, ref_model = ref_policy.model, stride=cfg.stride)
+                            raw_loss = self.model.compute_loss(batch, stride=cfg.stride, ref_model=ref_policy)
                             loss = raw_loss / cfg.training.gradient_accumulate_every
                             loss.backward()
 
@@ -308,26 +292,26 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
                         policy = self.ema_model
                     policy.eval()
 
-                    # # run diffusion sampling on a training batch
-                    # if (self.epoch % cfg.training.sample_every) == 0:
-                    #     with torch.no_grad():
-                    #         # sample trajectory from training set, and evaluate difference
-                    #         batch = dict_apply(train_sampling_batch, lambda x: x.to(device, non_blocking=True))
-                    #         obs_dict = batch['obs']
-                    #         for key in obs_dict.keys():
-                    #             obs_dict[key] = obs_dict[key][:, :self.model.n_obs_steps, ...]
-                    #         gt_action = batch['action'][:, self.model.n_obs_steps:self.model.n_obs_steps+self.model.n_action_steps, ...]
+                    # run diffusion sampling on a training batch
+                    if (self.epoch % cfg.training.sample_every) == 0:
+                        with torch.no_grad():
+                            # sample trajectory from training set, and evaluate difference
+                            batch = dict_apply(train_sampling_batch, lambda x: x.to(device, non_blocking=True))
+                            obs_dict = batch['obs']
+                            for key in obs_dict.keys():
+                                obs_dict[key] = obs_dict[key][:, :self.model.n_obs_steps, ...]
+                            gt_action = batch['action'][:, self.model.n_obs_steps:self.model.n_obs_steps+self.model.n_action_steps, ...]
                             
-                    #         result = policy.predict_action(obs_dict)
-                    #         pred_action = result['action_pred']
-                    #         mse = torch.nn.functional.mse_loss(pred_action, gt_action)
-                    #         step_log['train_action_mse_error'] = mse.item()
-                    #         del batch
-                    #         del obs_dict
-                    #         del gt_action
-                    #         del result
-                    #         del pred_action
-                    #         del mse
+                            result = policy.predict_action(obs_dict)
+                            pred_action = result['action_pred']
+                            mse = torch.nn.functional.mse_loss(pred_action, gt_action)
+                            step_log['train_action_mse_error'] = mse.item()
+                            del batch
+                            del obs_dict
+                            del gt_action
+                            del result
+                            del pred_action
+                            del mse
                     
                     # checkpoint
                     if (self.epoch % cfg.training.checkpoint_every) == 0:

@@ -8,6 +8,7 @@ import numpy as np
 from functools import cached_property
 import cv2
 import concurrent.futures
+from diffusion_policy.model.common.slice import slice_episode, slice_episode_time
 
 def check_chunks_compatible(chunks: tuple, shape: tuple):
     assert len(shape) == len(chunks)
@@ -148,6 +149,18 @@ class Pref_RealRobotReplayBuffer:
         return cls.create_from_group(group=group, **kwargs)
 
     # ============= Add episodes ===============
+    def get_traj_info(self, sequence_length, stride, horizon):
+        self.sequence_length = sequence_length
+        self.stride = stride
+        self.horizon = horizon
+        self.local_num = math.floor((sequence_length - horizon) / stride) + 1
+
+    def slice_all_data(self):
+        data = self.root['data']
+
+        for key in data.keys():
+            data[key] = slice_episode(data[key], horizon=self.horizon, stride=self.stride)
+
     def add_pref_episode(self, data: Dict[str, np.ndarray], 
                          meta_data: Optional[Dict[str, Union[np.ndarray, int]]] = None,
                          chunks: Optional[Dict[str, tuple]] = dict(),
@@ -229,45 +242,57 @@ class Pref_RealRobotReplayBuffer:
 
         if copy:
             data = self.root['data'].copy()
-            data = self.unflatten_dataset_dict(data)
-            action = data['action'][idx]
-            action_2 = data['action_2'][idx]
-            obs = data['obs']
-            obs_2 = data['obs_2']
-            camera_keys = obs['images'].keys()
-            compress_len = data['compress_len']
-            compress_len_2 = data['compress_len_2']
-            del data
+        else:
+            data = self.root['data']
+        data = self.unflatten_dataset_dict(data)
+        action = data['action'][idx]
+        action_2 = data['action_2'][idx]
+        obs = data['obs']
+        obs_2 = data['obs_2']
+        compress_len = data['compress_len']
+        compress_len_2 = data['compress_len_2']
+        camera_keys = obs['images'].keys()
+        qpos_keys = [key for key in obs.keys() if key != 'images']
+        del data
 
-            all_cam_images = {}
-            for cam_name in camera_keys:
-                decompressed_images = []
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    results = executor.map(decode_image, \
-                                obs['images'][cam_name][idx, :int(compress_len[idx, 0])])
-                    decompressed_images = list(results)
+        all_obs_data = {}
+        for cam_name in camera_keys:
+            decompressed_images = []
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                results = executor.map(decode_image, \
+                            obs['images'][cam_name][idx, :int(compress_len[idx, 0])])
+                decompressed_images = list(results)
 
-                decompressed_images = np.array(decompressed_images)
-                decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
-                decompressed_images = decompressed_images / 255.0
-                all_cam_images.update({cam_name: decompressed_images.astype(np.float32)})
+            decompressed_images = np.array(decompressed_images)
+            decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
+            decompressed_images = decompressed_images / 255.0
+            all_obs_data.update({cam_name: decompressed_images.astype(np.float32)})
 
-            all_cam_images_2 = {}
-            for cam_name in camera_keys:
-                decompressed_images = []
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    results = executor.map(decode_image, \
-                                obs_2['images'][cam_name][idx, :int(compress_len_2[idx, 0])])
-                    decompressed_images = list(results)
+        for qpos_key in qpos_keys:
+            qpos_data = obs[qpos_key][idx]
+            all_obs_data.update({qpos_key: qpos_data.astype(np.float32)})
 
-                decompressed_images = np.array(decompressed_images)
-                decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
-                decompressed_images = decompressed_images / 255.0
-                all_cam_images_2.update({cam_name: decompressed_images.astype(np.float32)})
+        all_obs_data_2 = {}
+        for cam_name in camera_keys:
+            decompressed_images = []
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                results = executor.map(decode_image, \
+                            obs_2['images'][cam_name][idx, :int(compress_len_2[idx, 0])])
+                decompressed_images = list(results)
 
+            decompressed_images = np.array(decompressed_images)
+            decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
+            decompressed_images = decompressed_images / 255.0
+            all_obs_data_2.update({cam_name: decompressed_images.astype(np.float32)})
+
+        for qpos_key in qpos_keys:
+            qpos_data = obs_2[qpos_key][idx]
+            all_obs_data_2.update({qpos_key: qpos_data.astype(np.float32)})
+
+        if copy:
             return {
-                'obs': all_cam_images,
-                'obs_2': all_cam_images_2,
+                'obs':  all_obs_data,
+                'obs_2': all_obs_data_2,
                 'action': action.astype(np.float32),
                 'action_2': action_2.astype(np.float32),
                 'votes': self.root['meta']['votes'][idx].copy(),
@@ -275,53 +300,99 @@ class Pref_RealRobotReplayBuffer:
                 'beta_priori': self.root['meta']['beta_priori'][idx].copy(),
                 'beta_priori_2': self.root['meta']['beta_priori_2'][idx].copy(),
             }
+
         else:
-            data = self.root['data']
-            data = self.unflatten_dataset_dict(data)
-            action = data['action'][idx]
-            action_2 = data['action_2'][idx]
-            obs = data['obs']
-            obs_2 = data['obs_2']
-            camera_keys = obs['images'].keys()
-            compress_len = data['compress_len']
-            compress_len_2 = data['compress_len_2']
-            del data
-
-            all_cam_images = {}
-            for cam_name in camera_keys:
-                decompressed_images = []
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    results = executor.map(decode_image, \
-                                obs['images'][cam_name][idx, :, :int(compress_len[idx, 0, 0])])
-                    decompressed_images = list(results)
-
-                decompressed_images = np.array(decompressed_images)
-                decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
-                decompressed_images = decompressed_images / 255.0
-                all_cam_images.update({cam_name: decompressed_images.astype(np.float32)})
-
-            all_cam_images_2 = {}
-            for cam_name in camera_keys:
-                decompressed_images = []
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    results = executor.map(decode_image, \
-                                obs_2['images'][cam_name][idx, :, :int(compress_len[idx, 0, 0])])
-                    decompressed_images = list(results)
-
-                decompressed_images = np.array(decompressed_images)
-                decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
-                decompressed_images = decompressed_images / 255.0
-                all_cam_images_2.update({cam_name: decompressed_images.astype(np.float32)})
-
             return {
-                'obs': all_cam_images,
-                'obs_2': all_cam_images_2,
+                'obs': all_obs_data,
+                'obs_2': all_obs_data_2,
                 'action': action.astype(np.float32),
                 'action_2': action_2.astype(np.float32),
                 'votes': self.root['meta']['votes'][idx],
                 'votes_2': self.root['meta']['votes_2'][idx],
                 'beta_priori': self.root['meta']['beta_priori'][idx],
                 'beta_priori_2': self.root['meta']['beta_priori_2'][idx],
+            }
+
+    def get_pref_slice(self, idx: int, copy: bool = False):
+        """
+        Get a pair of episodes by index, including observation and action sequences for both trajectories.
+        """
+        traj_idx = math.floor(idx / self.local_num)
+        local_idx = idx - traj_idx * self.local_num
+        def decode_image(data):
+            return cv2.imdecode(data, 1)
+
+        if copy:
+            data = self.root['data'].copy()
+        else:
+            data = self.root['data']
+        data = self.unflatten_dataset_dict(data)
+        action = data['action'][local_idx, traj_idx]
+        action_2 = data['action_2'][local_idx, traj_idx]
+        obs = data['obs']
+        obs_2 = data['obs_2']
+        compress_len = data['compress_len']
+        compress_len_2 = data['compress_len_2']
+        camera_keys = obs['images'].keys()
+        qpos_keys = [key for key in obs.keys() if key != 'images']
+        del data
+
+        all_obs_data = {}
+        for cam_name in camera_keys:
+            decompressed_images = []
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                results = executor.map(decode_image, \
+                            obs['images'][cam_name][local_idx, traj_idx, :int(compress_len[local_idx, traj_idx, 0])])
+                decompressed_images = list(results)
+
+            decompressed_images = np.array(decompressed_images)
+            decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
+            decompressed_images = decompressed_images / 255.0
+            all_obs_data.update({cam_name: decompressed_images.astype(np.float32)})
+
+        for qpos_key in qpos_keys:
+            qpos_data = obs[qpos_key][local_idx, traj_idx]
+            all_obs_data.update({qpos_key: qpos_data.astype(np.float32)})
+
+        all_obs_data_2 = {}
+        for cam_name in camera_keys:
+            decompressed_images = []
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                results = executor.map(decode_image, \
+                            obs_2['images'][cam_name][local_idx, traj_idx, :int(compress_len_2[local_idx, traj_idx, 0])])
+                decompressed_images = list(results)
+
+            decompressed_images = np.array(decompressed_images)
+            decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
+            decompressed_images = decompressed_images / 255.0
+            all_obs_data_2.update({cam_name: decompressed_images.astype(np.float32)})
+
+        for qpos_key in qpos_keys:
+            qpos_data = obs_2[qpos_key][local_idx, traj_idx]
+            all_obs_data_2.update({qpos_key: qpos_data.astype(np.float32)})
+
+
+        if copy:
+            return {
+                'obs': all_obs_data,
+                'obs_2': all_obs_data_2,
+                'action': action.astype(np.float32),
+                'action_2': action_2.astype(np.float32),
+                'votes': self.root['meta']['votes'][traj_idx].copy(),
+                'votes_2': self.root['meta']['votes_2'][traj_idx].copy(),
+                'beta_priori': self.root['meta']['beta_priori'][traj_idx].copy(),
+                'beta_priori_2': self.root['meta']['beta_priori_2'][traj_idx].copy(),
+            }
+        else:
+            return {
+                'obs': all_obs_data,
+                'obs_2': all_obs_data_2,
+                'action': action.astype(np.float32),
+                'action_2': action_2.astype(np.float32),
+                'votes': self.root['meta']['votes'][traj_idx],
+                'votes_2': self.root['meta']['votes_2'][traj_idx],
+                'beta_priori': self.root['meta']['beta_priori'][traj_idx],
+                'beta_priori_2': self.root['meta']['beta_priori_2'][traj_idx],
             }
 
     def get_episode_slice(self, idx):

@@ -9,7 +9,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "--config-name=train_diffusion_realrobot_workspace", 
+                "--config-name=pbrl_diffusion_realrobot_online_workspace", 
             ],
             "env": {
                 "CUDA_VISIBLE_DEVICES": "0"

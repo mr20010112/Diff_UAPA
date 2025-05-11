@@ -2,6 +2,7 @@ from typing import Optional, Dict
 import numpy as np
 from diffusion_policy.common.realrobot_replay_buffer import RealRobotReplayBuffer
 import torch
+import math
 
 def get_val_mask(n_episodes, val_ratio, seed=0):
     val_mask = np.zeros(n_episodes, dtype=bool)
@@ -17,7 +18,7 @@ def get_val_mask(n_episodes, val_ratio, seed=0):
 
 class RealRobotSequenceSampler:
     def __init__(self,
-                 replay_buffer: 'RealRobotReplayBuffer',
+                 replay_buffer: RealRobotReplayBuffer,
                  sequence_length: int,
                  episode_mask: Optional[np.ndarray]=None,
                  keys: Optional[Dict[str, int]] = None,
@@ -72,3 +73,4 @@ class RealRobotSequenceSampler:
         #         raise TypeError(f"Unsupported type {type(value)} for key '{key}'")
 
         return result
+    

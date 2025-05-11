@@ -63,10 +63,14 @@ class TrainDiffusionRealRobotWorkspace(BaseWorkspace):
 
         # resume training
         if cfg.training.resume:
-            lastest_ckpt_path = self.get_checkpoint_path()
-            if lastest_ckpt_path.is_file():
-                print(f"Resuming from checkpoint {lastest_ckpt_path}")
-                self.load_checkpoint(path=lastest_ckpt_path)
+            ckpt_path = pathlib.Path(cfg.checkpoint_dir)
+            if ckpt_path.is_file():
+                print(f"Resuming from checkpoint {ckpt_path}")
+                self.load_checkpoint(path=ckpt_path)
+            self.optimizer = self.optimizer = hydra.utils.instantiate( \
+                cfg.optimizer, params=self.model.parameters())
+            self.global_step = 0
+            self.epoch = 0
 
         # configure dataset
         dataset: BaseImageDataset
@@ -219,7 +223,7 @@ class TrainDiffusionRealRobotWorkspace(BaseWorkspace):
                         gt_action = batch['action'][:, self.model.n_obs_steps:self.model.n_obs_steps+self.model.n_action_steps, ...]
                         
                         result = policy.predict_action(obs_dict)
-                        pred_action = result['action_pred']
+                        pred_action = result['action']
                         mse = torch.nn.functional.mse_loss(pred_action, gt_action)
                         step_log['train_action_mse_error'] = mse.item()
                         del batch

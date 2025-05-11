@@ -5,7 +5,7 @@ defaults:
 name: train_diffusion_real_robot0
 _target_: diffusion_policy.workspace.train_diffusion_realrobot_workspace.TrainDiffusionRealRobotWorkspace
 
-
+checkpoint_dir: 'data/outputs/2025.05.11/18.30.44_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0005-train_action_mse_error=0.564.ckpt'
 shape_meta: ${task.shape_meta}
 exp_name: "default"
 
@@ -89,7 +89,7 @@ val_dataloader:
 
 optimizer:
   _target_: torch.optim.AdamW
-  lr: 1.0e-4
+  lr: 1.0e-5 #1.0e-4
   betas: [0.95, 0.999]
   eps: 1.0e-8
   weight_decay: 1.0e-6
@@ -101,8 +101,8 @@ training:
   resume: True
   # optimization
   lr_scheduler: cosine
-  lr_warmup_steps: 5
-  num_epochs: 6
+  lr_warmup_steps: 0
+  num_epochs: 5
   gradient_accumulate_every: 1
   # EMA destroys performance when used with BatchNorm
   # replace BatchNorm with GroupNorm.
@@ -113,7 +113,7 @@ training:
   rollout_every: 1
   checkpoint_every: 1
   val_every: 1
-  sample_every: 5
+  sample_every: 1
   # steps per epoch
   max_train_steps: null
   max_val_steps: null
@@ -131,10 +131,10 @@ logging:
 
 checkpoint:
   topk:
-    monitor_key: train_loss
+    monitor_key: train_action_mse_error
     mode: max
     k: 5
-    format_str: 'epoch={epoch:04d}-train_loss={train_loss:.3f}.ckpt'
+    format_str: 'epoch={epoch:04d}-train_action_mse_error={train_action_mse_error:.3f}.ckpt'
   save_last_ckpt: True
   save_last_snapshot: False
 

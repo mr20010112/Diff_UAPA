@@ -22,10 +22,6 @@ shape_meta: &shape_meta
       shape: [1]
       type: low_dim
 
-    hand_pose:
-      shape: [7]
-      type: low_dim
-      
     # cam_right:
     #   shape: ${task.image_shape} #also need to be changed in the dataset
 

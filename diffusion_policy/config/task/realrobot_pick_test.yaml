@@ -9,6 +9,17 @@ shape_meta: &shape_meta
     cam_left:
       shape: ${task.image_shape}
 
+    arm_action:
+      shape: [6]
+      type: low_dim
+
+    arm_pose:
+      shape: [7]
+      type: low_dim
+
+    hand_action:
+      shape: [1]
+      type: low_dim
     # cam_right:
     #   shape: ${task.image_shape} #also need to be changed in the dataset
 
