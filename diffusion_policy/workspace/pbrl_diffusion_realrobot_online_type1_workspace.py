@@ -256,7 +256,7 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
                                 train_sampling_batch = batch
 
                             # compute loss
-                            stride = int(self.model.horizon / 2) #2*self.model.n_obs_steps
+                            stride = int(self.model.horizon) #2*self.model.n_obs_steps
                             avg_traj_loss = 0.0
                             if cfg.training.map.use_map:
                                 avg_traj_loss = compute_all_traj_image_loss(replay_buffer = pref_dataset.pref_replay_buffer, \

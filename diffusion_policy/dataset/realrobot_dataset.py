@@ -147,7 +147,9 @@ class Hdf5RealRobotDataset(BaseImageDataset):
 
     def get_normalizer(self, mode='limits', **kwargs):
         data = self.replay_buffer.data #To Do
-        obs_keys = [k for k in data.keys() if "image" in k]
+        image_keys = [k for k in data.keys() if "image" in k]
+        qpos_keys = [k for k in data.keys() if ("observation" in k) and ("image" not in k)]
+
 
         normalizer = LinearNormalizer()
 
@@ -155,9 +157,14 @@ class Hdf5RealRobotDataset(BaseImageDataset):
         normalizer['action'] = SingleFieldLinearNormalizer.create_fit(
             self.replay_buffer.data['action'])
         
-        for key in obs_keys:
+        for key in image_keys:
             key = key.replace("observations/images/", "")
-            normalizer[key] = get_image_range_normalizer()        
+            normalizer[key] = get_image_range_normalizer()
+
+        for key in qpos_keys:
+            new_key = key.replace("observations/", "")        
+            normalizer[new_key] = SingleFieldLinearNormalizer.create_fit(
+                self.replay_buffer.data[key])
 
         return normalizer
 

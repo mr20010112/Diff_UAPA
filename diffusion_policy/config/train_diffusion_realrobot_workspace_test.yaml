@@ -1,11 +1,11 @@
 defaults:
   - _self_
-  - task: real_pusht_image #real_pusht_image
+  - task: realrobot_pick_test
 
-name: train_diffusion_unet_image
-_target_: diffusion_policy.workspace.train_diffusion_unet_image_workspace.TrainDiffusionUnetImageWorkspace
+name: train_diffusion_real_robot0
+_target_: diffusion_policy.workspace.train_diffusion_realrobot_workspace.TrainDiffusionRealRobotWorkspace
 
-task_name: ${task.name}
+
 shape_meta: ${task.shape_meta}
 exp_name: "default"
 
@@ -19,7 +19,7 @@ keypoint_visible_rate: 1.0
 obs_as_global_cond: True
 
 policy:
-  _target_: diffusion_policy.policy.diffusion_unet_image_policy.DiffusionUnetImagePolicy
+  _target_: diffusion_policy.policy.diffusion_realrobot_policy.DiffusionRealRobotPolicy
 
   shape_meta: ${shape_meta}
   
@@ -37,16 +37,16 @@ policy:
     prediction_type: epsilon # or sample
 
   obs_encoder:
-    _target_: diffusion_policy.model.vision.multi_image_obs_encoder.MultiImageObsEncoder
+    _target_: diffusion_policy.model.vision.realrobot_image_obs_encoder.RealRobotImageObsEncoder
     shape_meta: ${shape_meta}
     rgb_model:
       _target_: diffusion_policy.model.vision.model_getter.get_resnet
       name: resnet18
       weights: null
-    resize_shape: [240, 320]
-    crop_shape: [216, 288] # ch, cw 240x320 90%
-    random_crop: True
-    use_group_norm: True
+    resize_shape: [1024, 1280]
+    crop_shape: [922, 1152] # ch, cw 90%
+    random_crop: False #True
+    use_group_norm: False #True
     share_rgb_model: False
     imagenet_norm: True
 
@@ -101,8 +101,8 @@ training:
   resume: True
   # optimization
   lr_scheduler: cosine
-  lr_warmup_steps: 1
-  num_epochs: 1
+  lr_warmup_steps: 5
+  num_epochs: 6
   gradient_accumulate_every: 1
   # EMA destroys performance when used with BatchNorm
   # replace BatchNorm with GroupNorm.
@@ -124,29 +124,29 @@ logging:
   project: diffusion_policy_debug
   resume: True
   mode: online
-  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
-  tags: ["${name}", "${task_name}", "${exp_name}"]
+  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_real_robot
+  tags: ["${name}", "${exp_name}"]
   id: null
   group: null
 
 checkpoint:
   topk:
     monitor_key: train_loss
-    mode: min
+    mode: max
     k: 5
     format_str: 'epoch={epoch:04d}-train_loss={train_loss:.3f}.ckpt'
   save_last_ckpt: True
   save_last_snapshot: False
 
 multi_run:
-  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
-  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_real_robot
+  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_real_robot
 
 hydra:
   job:
     override_dirname: ${name}
   run:
-    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_real_robot
   sweep:
-    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_real_robot
     subdir: ${hydra.job.num}

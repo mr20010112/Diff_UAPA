@@ -1,4 +1,5 @@
 from typing import Dict
+import copy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -195,8 +196,8 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
     def compute_loss(self, batch, stride=1):
         # normalize input
         #assert 'valid_mask' not in batch
-        obs = batch['obs']
-        action = batch['action']
+        obs = copy.deepcopy(batch['obs'])
+        action = batch['action'].clone()
         batch_size = action.shape[0]
         horizon = self.horizon
         total_loss = 0

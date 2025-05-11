@@ -583,7 +583,7 @@ class RealRobotReplayBuffer:
         def decode_image(data):
             return cv2.imdecode(data, 1)
 
-        all_cam_images = {}
+        obs_data = {}
         for cam_name in camera_keys:
             decompressed_images = []
             with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -594,12 +594,15 @@ class RealRobotReplayBuffer:
             decompressed_images = np.array(decompressed_images)
             decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
             decompressed_images = decompressed_images / 255.0
-            all_cam_images.update({cam_name: decompressed_images.astype(np.float32)})
+            obs_data.update({cam_name: decompressed_images.astype(np.float32)})
+        
+        for key in observations.keys():
+            if key != 'images':
+                obs_data.update({key: observations[key].astype(np.float32)})
     
         episode = {
-            'obs': all_cam_images,
+            'obs': obs_data,
             'action': action.astype(np.float32),
-            # 'qpos': qpos.astype(np.float32),
         }
 
         return episode
