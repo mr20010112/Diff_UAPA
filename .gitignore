@@ -1,2 +1,6 @@
 /data/
 robomimic_image.zip
+
+__pycache__/
+*.py[cod]
+*.ckpt
