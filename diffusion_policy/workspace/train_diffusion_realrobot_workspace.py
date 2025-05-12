@@ -66,8 +66,11 @@ class TrainDiffusionRealRobotWorkspace(BaseWorkspace):
             ckpt_path = pathlib.Path(cfg.checkpoint_dir)
             if ckpt_path.is_file():
                 print(f"Resuming from checkpoint {ckpt_path}")
-                self.load_checkpoint(path=ckpt_path)
-            self.optimizer = self.optimizer = hydra.utils.instantiate( \
+                if cfg.exclude_keys is None:
+                    self.load_checkpoint(path=ckpt_path)
+                else:
+                    self.load_checkpoint(path=ckpt_path, exclude_keys=cfg.exclude_keys)
+            self.optimizer = hydra.utils.instantiate( \
                 cfg.optimizer, params=self.model.parameters())
             self.global_step = 0
             self.epoch = 0
@@ -86,6 +89,10 @@ class TrainDiffusionRealRobotWorkspace(BaseWorkspace):
         self.model.set_normalizer(normalizer)
         if cfg.training.use_ema:
             self.ema_model.set_normalizer(normalizer)
+
+        for param_group in self.optimizer.param_groups:
+            if 'initial_lr' not in param_group:
+                param_group['initial_lr'] = cfg.optimizer.lr
 
         # configure lr scheduler
         lr_scheduler = get_scheduler(
@@ -164,7 +171,7 @@ class TrainDiffusionRealRobotWorkspace(BaseWorkspace):
                             train_sampling_batch = batch
 
                         # compute loss
-                        stride = 2*self.model.n_obs_steps
+                        stride = cfg.stride
                         raw_loss = self.model.compute_loss(batch, stride)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
                         loss.backward()

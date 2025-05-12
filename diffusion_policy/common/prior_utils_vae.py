@@ -7,10 +7,15 @@ import torch
 import torch.nn as nn
 import math
 # import d4rl
+import cv2
+import concurrent.futures
 from tqdm import tqdm
 import torch.nn.functional as F
 from pathlib import Path
-
+from torch.optim.lr_scheduler import SequentialLR, LinearLR, CosineAnnealingLR
+from diffusion_policy.model.vision.realrobot_image_obs_encoder import RealRobotImageObsEncoder
+from diffusion_policy.common.pytorch_util import dict_apply
+from diffusion_policy.model.common.normalizer import LinearNormalizer
 
 Batch = collections.namedtuple(
     'Batch',
@@ -258,7 +263,7 @@ class MLPBetaModel(nn.Module):
         return output
 
 class BetaNetwork(nn.Module):
-    def __init__(self,observation_dim, action_dim, lr=3e-4, device=torch.device('cuda'),
+    def __init__(self,observation_dim, action_dim, obs_encoder: RealRobotImageObsEncoder=None, lr=3e-4, device=torch.device('cuda'),
                  model_type='Transformer', beta_coef=0.1):
         super(BetaNetwork, self).__init__()
         self.observation_dim = observation_dim
@@ -266,6 +271,7 @@ class BetaNetwork(nn.Module):
         self.lr = lr
         self.beta_coef = beta_coef
         self.device = device
+        self.obs_encoder = obs_encoder
 
         if 'Causal' in model_type:
             self.model = CausalTransformerBetaModel(
@@ -490,6 +496,316 @@ class BetaNetwork(nn.Module):
 
     def load_model(self, filepath):
         self.load_state_dict(torch.load(filepath, map_location=self.device))
+
+class RealRobotBetaNetwork(nn.Module):
+    def __init__(self,observation_dim, action_dim, obs_encoder: RealRobotImageObsEncoder, normalizer: LinearNormalizer,
+                 lr=3e-4, device=torch.device('cuda'), model_type='Transformer', beta_coef=0.1):
+        super(RealRobotBetaNetwork, self).__init__()
+        self.observation_dim = observation_dim
+        self.action_dim = action_dim
+        self.lr = lr
+        self.beta_coef = beta_coef
+        self.device = device
+        self.obs_encoder = obs_encoder
+        self.normalizer = normalizer
+
+        if 'Causal' in model_type:
+            self.model = CausalTransformerBetaModel(
+                data_dim=self.observation_dim + self.action_dim,
+                embedding_dim=256,
+                nhead=4,
+                num_encoder_layers=1,
+                output_dim=2,
+                device=self.device,
+            ).to(self.device)
+        elif 'Transformer' in model_type:
+            self.model = TransformerBetaModel(
+                data_dim = self.observation_dim + self.action_dim,
+                embedding_dim = 256,
+                nhead = 4,
+                num_encoder_layers = 1,
+                output_dim = 2,
+                device = self.device,
+            ).to(self.device)
+        else:
+            self.model = MLPBetaModel(
+                data_dim = self.observation_dim + self.action_dim,
+                device = self.device,
+            )
+
+        params = list(self.model.parameters()) + list(self.obs_encoder.parameters())
+        self.opt = torch.optim.Adam(params, lr=self.lr)
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.opt, mode='min', patience=10)
+
+    def get_alpha_beta(self, x):
+        alpha_beta = self.model(x).detach()
+        alpha = alpha_beta[:, 0]
+        beta = alpha_beta[:, 1]
+        # alpha, beta = self.model(x)
+        return alpha.detach(), beta.detach()
+
+    def kl_regularizer_loss(self, batch_size, alpha, beta):
+        prior = torch.tensor(np.asarray(batch_size * [[1, 1]]), dtype=torch.float32).to(self.device)
+        analytical_kld_loss = dirichlet_kl_divergence_loss(
+            alpha=torch.stack([alpha, beta], dim=1),
+            prior=prior).mean()
+        return analytical_kld_loss
+
+
+    def fit_data(self, dataset, save_dir=None, load_dir=None, num_epochs=1, warm_up_epochs=0, batch_size=1, lr=1.0e-5):
+        def decode_image(data):
+            return cv2.imdecode(data, 1)
+        
+        if load_dir is None:
+            interval = math.ceil(dataset["action"].shape[0] / batch_size)
+            total_steps = num_epochs * interval
+            warm_up_steps = warm_up_epochs * interval
+            main_steps = total_steps - warm_up_steps
+
+            # Learning rate schedulers
+            self.lr = lr
+            self.opt = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
+            warm_up_scheduler = LinearLR(self.opt, start_factor=1e-8, end_factor=1.0, total_iters=warm_up_steps)
+            cosine_scheduler = CosineAnnealingLR(self.opt, T_max=main_steps)
+            self.scheduler = SequentialLR(self.opt, schedulers=[warm_up_scheduler, cosine_scheduler], milestones=[warm_up_steps])
+
+
+            sequence_length = dataset["action"].shape[1]
+            camera_keys = dataset["obs"]["images"].keys()
+            qpos_keys = [key for key in dataset["obs"].keys() if key != 'images']
+
+            for epoch in range(num_epochs):
+
+                beta_loss_1 = []
+                beta_loss_2 = []
+                beta_loss_3 = []
+                beta_loss_4 = []
+                beta_loss_all = []
+
+                batch_shuffled_idx = np.random.permutation(dataset["action"].shape[0])
+                for i in tqdm(range(interval)):
+
+                    start_pt = i * batch_size
+                    end_pt = min((i + 1) * batch_size, dataset["action"].shape[0])
+                    indices = batch_shuffled_idx[start_pt:end_pt]
+                    batch = {}
+                    batch["action"] = dataset["action"][indices]
+                    batch["action_2"] = dataset["action_2"][indices]
+                    batch["votes"] = dataset["votes"][indices]
+                    batch["votes_2"] = dataset["votes_2"][indices]
+                    batch['obs'] = {}
+                    batch['obs_2'] = {}
+                    batch['obs']['images'] = {}
+                    batch['obs_2']['images'] = {}
+                    compress_len = dataset["compress_len"][indices].squeeze(-1)
+                    compress_len_2 = dataset["compress_len_2"][indices].squeeze(-1)
+
+                    for key in qpos_keys:
+                        batch['obs'][key] = dataset["obs"][key][indices]
+                        batch['obs_2'][key] = dataset["obs_2"][key][indices]
+
+                    for key in camera_keys:
+                        image_data_1 = dataset["obs"]["images"][key][indices]
+                        image_data_2 = dataset["obs_2"]["images"][key][indices]
+                        decompressed_images = []
+                        decompressed_images_2 = []
+                        for k in range(len(image_data_1)):
+                            with concurrent.futures.ThreadPoolExecutor() as executor:
+                                results = executor.map(decode_image, \
+                                        image_data_1[k, :compress_len[k, 0]])
+                                results_2 = executor.map(decode_image, \
+                                        image_data_2[k, :compress_len_2[k, 0]])
+                                decompressed_image = list(results)
+                                decompressed_image_2 = list(results_2)
+                                decompressed_images.append(np.array(decompressed_image))
+                                decompressed_images_2.append(np.array(decompressed_image_2))
+                        
+                        decompressed_images = np.array(decompressed_images)
+                        decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
+                        decompressed_images = decompressed_images / 255.0
+
+                        decompressed_images_2 = np.array(decompressed_images_2)
+                        decompressed_images_2 = np.einsum('k h w c -> k c h w', decompressed_images_2)
+                        decompressed_images_2 = decompressed_images_2 / 255.0
+
+                        batch['obs']['images'][key] = torch.from_numpy(decompressed_images).to(self.device)
+                        batch['obs_2']['images'][key] = torch.from_numpy(decompressed_images_2).to(self.device)
+
+                    batch = dict_apply(batch, torch.from_numpy)
+
+                    # get batch
+                    obs_1 = self.normalizer.normalize(batch['obs'])  # batch_size * traj_len * obs_dim
+                    act_1 = self.normalizer['action'].normalize(batch['action']) # batch_size * traj_len * action_dim
+                    obs_2 = self.normalizer.normalize(batch['obs_2'])
+                    act_2 = self.normalizer['action_2'].normalize(batch['action_2'])
+
+                    this_nobs = dict_apply(obs_1, lambda x: x.reshape(-1, *x.shape[2:]))
+                    nobs_features = self.obs_encoder(this_nobs)
+                    global_cond = nobs_features.reshape(batch_size, sequence_length, -1)
+                    this_nobs_2 = dict_apply(obs_2, lambda x: x.reshape(-1, *x.shape[2:]))
+                    nobs_features_2 = self.obs_encoder(this_nobs_2)
+                    global_cond_2 = nobs_features_2.reshape(batch_size, sequence_length, -1)
+
+                    
+                    s_a_1 = np.concatenate([global_cond, act_1], axis=-1)
+                    s_a_2 = np.concatenate([global_cond_2, act_2], axis=-1)
+
+                    conditions_1 = [
+                        np.all(batch['votes'] == 1, axis=1),
+                        np.all(batch['votes'] == 0, axis=1),
+                        np.all(batch['votes'] == 0.5, axis=1)
+                        ]
+                    values = [1, 0, 0]
+                    single_labels_1 = torch.from_numpy(np.select(conditions_1, values)).float().to(self.device)
+
+                    conditions_2 = [
+                        np.all(batch['votes_2'] == 1, axis=1),
+                        np.all(batch['votes_2'] == 0, axis=1),
+                        np.all(batch['votes_2'] == 0.5, axis=1)
+                        ]
+                    values = [1, 0, 0]
+                    single_labels_2 = torch.from_numpy(np.select(conditions_2, values)).float().to(self.device)
+
+                    pred_1_alpha_beta = self.model(torch.from_numpy(s_a_1).float().to(self.device)) # batch_size * 2
+                    pred_1_alpha = pred_1_alpha_beta[:, 0]
+                    pred_1_beta = pred_1_alpha_beta[:, 1]
+
+
+                    pred_2_alpha_beta = self.model(torch.from_numpy(s_a_2).float().to(self.device))
+                    pred_2_alpha = pred_2_alpha_beta[:, 0]
+                    pred_2_beta = pred_2_alpha_beta[:, 1]
+                    # if equal, then discard
+                    # TODO maybe if equal, then both towards 1 (both preferred)
+
+                    loss_1 = torch.mean((torch.log(pred_1_alpha) + torch.log(pred_2_beta))* single_labels_1 \
+                            + (torch.log(pred_2_alpha) + torch.log(pred_1_beta)) * single_labels_2)
+
+                    # var_1 = (pred_1_alpha * pred_1_beta) / ((pred_1_alpha + pred_1_beta) ** 2 * (pred_1_alpha + pred_1_beta + 1))
+                    
+                    # var_2 = (pred_2_alpha * pred_2_beta) / ((pred_2_alpha + pred_2_beta) ** 2 * (pred_2_alpha + pred_2_beta + 1))
+
+                    # loss_2 = (torch.clamp(torch.mean(torch.sqrt(var_1)) - torch.sqrt(torch.tensor(1 / 324, dtype=torch.float32, device=self.device)), min=0)) ** 2 \
+                    #         + (torch.clamp(torch.mean(torch.sqrt(var_2)) - torch.sqrt(torch.tensor(1 / 324, dtype=torch.float32, device=self.device)), min=0)) ** 2
+                    loss_2 = torch.mean(torch.clamp(pred_1_alpha - 25, min=0) ** 2) + torch.mean(torch.clamp(pred_2_alpha - 25, min=0) ** 2) \
+                            + torch.mean(torch.clamp(pred_1_beta - 25, min=0) ** 2) + torch.mean(torch.clamp(pred_2_beta - 25, min=0) ** 2)
+                    
+                    # loss_3 = torch.log(4 / pred_1_alpha.std()) + (pred_1_alpha.var() + (pred_1_alpha.mean() - 12.5) ** 2) / (2 * 16) -0.5 \
+                    #         + torch.log(4 / pred_2_alpha.std()) + (pred_2_alpha.var() + (pred_2_alpha.mean() - 12.5) ** 2) / (2 * 16) -0.5 \
+                    #         + torch.log(4 / pred_1_beta.std()) + (pred_1_beta.var() + (pred_1_beta.mean() - 12.5) ** 2) / (2 * 16) -0.5 \
+                    #         + torch.log(4 / pred_2_beta.std()) + (pred_2_beta.var() + (pred_2_beta.mean() - 12.5) ** 2) / (2 * 16) -0.5
+
+                    controls_alpha_1 = torch.distributions.Normal(torch.mean(single_labels_1) * 12.5, \
+                                        (12.5 / 3) * torch.mean(single_labels_1)).rsample((pred_1_alpha.shape[0],))
+                    controls_alpha_1 = torch.sort(controls_alpha_1, dim=0)[0].to(self.device)
+
+                    controls_alpha_2 = torch.distributions.Normal(torch.mean(single_labels_2) * 12.5, \
+                                        (12.5 / 3) * torch.mean(single_labels_2)).rsample((pred_2_alpha.shape[0],))
+                    controls_alpha_2 = torch.sort(controls_alpha_2, dim=0)[0].to(self.device)
+
+                    controls_beta_1 = torch.distributions.Normal(torch.mean(single_labels_2) * 12.5, \
+                                        (12.5 / 3) * torch.mean(single_labels_2)).rsample((pred_2_alpha.shape[0],))
+                    controls_beta_1 = torch.sort(controls_beta_1, dim=0)[0].to(self.device)
+
+                    controls_beta_2 = torch.distributions.Normal(torch.mean(single_labels_1) * 12.5, \
+                                        (12.5 / 3) * torch.mean(single_labels_1)).rsample((pred_1_alpha.shape[0],))
+                    controls_beta_2 = torch.sort(controls_beta_2, dim=0)[0].to(self.device)
+
+                    loss_3 = torch.mean((torch.sort(pred_1_alpha, dim=0)[0] - controls_alpha_1) ** 2) \
+                            + torch.mean((torch.sort(pred_2_alpha, dim=0)[0] - controls_alpha_2) ** 2) \
+                            + torch.mean((torch.sort(pred_1_beta, dim=0)[0] - controls_beta_1) ** 2) \
+                            + torch.mean((torch.sort(pred_2_beta, dim=0)[0] - controls_beta_2) ** 2)
+
+                    loss_4 = self.kl_regularizer_loss(pred_1_alpha.shape[0], alpha=pred_1_alpha, beta=pred_1_beta) \
+                            + self.kl_regularizer_loss(pred_2_alpha.shape[0], alpha=pred_2_alpha, beta=pred_2_beta)
+
+                    beta_loss = -loss_1 + loss_2 + loss_3 + self.beta_coef*loss_4
+
+                    beta_loss_1.append(loss_1)
+                    beta_loss_2.append(loss_2)
+                    beta_loss_3.append(loss_3)
+                    beta_loss_4.append(loss_4)
+
+                    beta_loss_all.append(beta_loss)
+
+                    self.opt.zero_grad()
+                    beta_loss.backward()
+                    self.opt.step()
+
+                # Scheduler step
+                avg_loss = torch.stack(beta_loss_all).mean().item()
+                self.scheduler.step(avg_loss)
+
+                beta_loss_1 = torch.stack(beta_loss_1, dim=0)
+                beta_loss_2 = torch.stack(beta_loss_2, dim=0)
+                beta_loss_3 = torch.stack(beta_loss_3, dim=0)
+                beta_loss_4 = torch.stack(beta_loss_4, dim=0)
+                beta_loss_all = torch.stack(beta_loss_all, dim=0)
+                print("iteration:", epoch + 1)
+                print("mean_beta_loss_data:", torch.mean(beta_loss_1).item())
+                print("mean_beta_loss_control:", torch.mean(beta_loss_2).item())
+                print("mean_beta_loss_control_2:", torch.mean(beta_loss_3).item())
+                print("mean_beta_loss_kl:", torch.mean(beta_loss_4).item())
+                print("mean_beta_loss_all:", torch.mean(beta_loss_all).item())
+
+                if save_dir is not None and (epoch+1) % 200 == 0:
+                    tmp_save_dir= Path(save_dir) / f'itr_{epoch+1}'
+                    tmp_save_dir.mkdir(parents=True, exist_ok=True)
+                    model_file = tmp_save_dir / 'beta_model.pth'
+                    self.save_model(model_file)
+        else:
+            self.load_model(load_dir)
+
+    def fit_data_discrete(self, dataset):
+
+        obs_1 = dataset['observations']  # batch_size * traj_len * obs_dim
+        obs_2 = dataset['observations_2']
+
+        conditions = [np.all(dataset['labels'] == [1, 0], axis=1),
+                      np.all(dataset['labels'] == [0, 1], axis=1),
+                      np.all(dataset['labels'] == [0.5, 0.5], axis=1)]
+        values = [1, -1, 0]
+        single_labels = torch.from_numpy(np.select(conditions, values)).float().to(self.device)
+
+        discrete_obs_1 = get_discrete_traj(obs_1, dim=2)
+        discrete_obs_2 = get_discrete_traj(obs_2, dim=2)
+
+        traj_alpha_beta_dict = init_trajectory_dict(discrete_obs_1 + discrete_obs_2)
+        self.traj_alpha_beta_dict = get_trajectory_dict_from_pair(traj_alpha_beta_dict, discrete_obs_1, discrete_obs_2,
+                                                                  single_labels)
+
+    def get_alpha_beta_discrete(self, x, dim=2):
+        traj = x.cpu().numpy()
+        discrete_obs = get_discrete_traj(traj, dim=dim)[0]
+        alpha = self.traj_alpha_beta_dict[discrete_obs][0]
+        beta = self.traj_alpha_beta_dict[discrete_obs][1]
+        return alpha, beta
+
+    def get_normalized_alpha_beta_discrete(self, x, dim=2):
+        traj = x.cpu().numpy()
+        discrete_obs = get_discrete_traj(traj, dim=dim)[0]
+        alpha = self.traj_alpha_beta_dict[discrete_obs][0]
+        beta = self.traj_alpha_beta_dict[discrete_obs][1]
+        # Normalize alpha and beta
+        alpha_normalized = alpha / 10
+        beta_normalized = beta / 10
+        return alpha_normalized, beta_normalized
+
+    def get_rescaled_alpha_beta_discrete(self, x, dim=2, rescale=10):
+        traj = x.cpu().numpy()
+        discrete_obs = get_discrete_traj(traj, dim=dim)[0]
+        alpha = self.traj_alpha_beta_dict[discrete_obs][0]
+        beta = self.traj_alpha_beta_dict[discrete_obs][1]
+        # Normalize alpha and beta
+        alpha_normalized = alpha / rescale
+        beta_normalized = beta / rescale
+        return alpha_normalized, beta_normalized
+
+    def save_model(self, filepath):
+        torch.save(self.state_dict(), filepath)
+
+    def load_model(self, filepath):
+        self.load_state_dict(torch.load(filepath, map_location=self.device))
+
 
 class PrefTransformer1(nn.Module):
     ''' Transformer Structure used in Preference Transformer.

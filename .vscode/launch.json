@@ -11,10 +11,10 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "--config-name=pbrl_diffusion_realrobot_online_workspace", 
+                "--config-name=train_diffusion_realrobot_workspace", 
             ],
             "env": {
-                "CUDA_VISIBLE_DEVICES": "3"
+                "CUDA_VISIBLE_DEVICES": "2"
             }
         }
     ]

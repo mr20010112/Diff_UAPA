@@ -21,7 +21,8 @@ from diffusion_policy.env.kitchen.kitchen_util import parse_mjl_logs
 from diffusion_policy.common.pref_realrobot_replay_buffer import Pref_RealRobotReplayBuffer
 from diffusion_policy.common.pref_realrobot_sampler import PrefSequenceSampler, PrefSliceSampler
 from typing import Optional, Dict
-from diffusion_policy.common.prior_utils_confidence import BetaNetwork
+from diffusion_policy.common.prior_utils_vae import RealRobotBetaNetwork
+from diffusion_policy.model.vision.realrobot_image_obs_encoder import RealRobotImageObsEncoder
 
 #处理 "kitchen" 任务的低维数据集。该类从 .mjl 文件中解析数据，存储在 ReplayBuffer 中，并对数据进行采样
 class RLHF_RealRobotDataset(BaseImageDataset):
@@ -98,6 +99,7 @@ class RLHF_RealRobotDataset(BaseImageDataset):
                                         mode='edge')
                     length = episode_1_len
             episode_1['obs'] = episode_1['observations']
+            del episode_1['observations']
             data = flatten_dataset_dict(episode_1)
 
             # Equal length processing for episode 2
@@ -175,6 +177,19 @@ class RLHF_RealRobotDataset(BaseImageDataset):
     #     normalizer.fit(data=self.replay_buffer.data, last_n_dims=1, mode=mode, **kwargs)
     #     return normalizer
 
+    def unflatten_dataset_dict(self, flat_dict, delimiter='/'):
+        result = {}
+        for compound_key, value in flat_dict.items():
+            keys = compound_key.split(delimiter)
+            current = result
+            for key in keys[:-1]:
+                if key not in current:
+                    current[key] = {}
+                current = current[key]
+            current[keys[-1]] = value
+        
+        return result
+
     def construct_pref_data(self):
         data = self.pref_replay_buffer.data
         pref_data = data.copy()
@@ -182,15 +197,21 @@ class RLHF_RealRobotDataset(BaseImageDataset):
         pref_data.update(meta)
         if 'episode_ends' in pref_data.keys():
             del pref_data['episode_ends']
+        pref_data = self.unflatten_dataset_dict(pref_data)
 
         return pref_data
 
-    def set_beta_priori(self, data_size=100):
-        pref_data = self.construct_pref_data()
-        self.beta_model = BetaNetwork(data=pref_data,
-                                 device=self.gpu_device,
-                                 data_size=data_size)
-
+    def set_beta_priori(self, obs_encoder: RealRobotImageObsEncoder, normalizer=None):
+        data = self.pref_replay_buffer.data
+        action_dim = data['action'].shape[-1]
+        observation_dim = obs_encoder.output_shape()[0]
+        del data
+        self.beta_model = RealRobotBetaNetwork(
+            observation_dim=observation_dim,
+            action_dim=action_dim,
+            obs_encoder=obs_encoder,
+            normalizer=normalizer,
+        )
     def update_beta_priori(self, batch_size=3):
 
         def scale_to_range(x, min_val, max_val, target_min=1, target_max=10):

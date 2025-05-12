@@ -1,18 +1,9 @@
-import pickle
-import numpy as np
+import torch
 
-# 加载 pkl 文件
-file_path = 'data/d4rl/expert/halfcheetah-medium-expert-v2.pkl'
-with open(file_path, 'rb') as f:
-    data = pickle.load(f)
+# 加载模型的ckpt文件
+checkpoint = torch.load('data/outputs/2025.05.12/18.44.09_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0015-train_action_mse_error=0.610.ckpt')
 
-# # 查看数据结构
-# print(type(data))  # 数据的顶层结构
-# print(len(data))   # 数据的长度（如果是列表或字典）
+# 查看包含的键值
+for key in checkpoint.keys():
+    print(f"Key: {key}, Type: {type(checkpoint[key])}, Value: {checkpoint[key]}")
 
-for key, value in data.items():
-    print(f"Key: {key}, Type: {type(value)}")
-    if isinstance(value, (list, dict)):
-        print(f"Length: {len(value)}")
-    elif isinstance(value, np.ndarray):
-        print(f"Shape: {value.shape}")

@@ -5,10 +5,13 @@ defaults:
 name: train_diffusion_real_robot0
 _target_: diffusion_policy.workspace.train_diffusion_realrobot_workspace.TrainDiffusionRealRobotWorkspace
 
-checkpoint_dir: 'data/outputs/2025.05.12/14.07.52_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0001-train_action_mse_error=0.590.ckpt'
+checkpoint_dir: 'data/outputs/2025.05.12/18.44.09_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0015-train_action_mse_error=0.610.ckpt'
+exclude_keys: 'optimizer'
+
 shape_meta: ${task.shape_meta}
 exp_name: "default"
 
+stride: 1
 horizon: 16
 n_obs_steps: 2
 n_action_steps: 8
@@ -74,7 +77,7 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 2
+  batch_size: 1
   num_workers: 8
   shuffle: True
   pin_memory: True
@@ -101,8 +104,8 @@ training:
   resume: True #True
   # optimization
   lr_scheduler: cosine
-  lr_warmup_steps: 10
-  num_epochs: 12
+  lr_warmup_steps: 50
+  num_epochs: 61
   gradient_accumulate_every: 1
   # EMA destroys performance when used with BatchNorm
   # replace BatchNorm with GroupNorm.
@@ -110,8 +113,8 @@ training:
   freeze_encoder: False
   # training loop control
   # in epochs
-  rollout_every: 1
-  checkpoint_every: 1
+  rollout_every: 5
+  checkpoint_every: 5
   val_every: 1
   sample_every: 1
   # steps per epoch

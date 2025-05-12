@@ -3,7 +3,7 @@ import hydra
 import dill
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 
-checkpoint = "data/outputs/2025.05.12/14.07.52_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0001-train_action_mse_error=0.590.ckpt"
+checkpoint = "data/outputs/2025.05.12/18.44.09_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0015-train_action_mse_error=0.610.ckpt"
 output_dir = "./Distributional-DPO-Robotics/data/pnp_output" # XXX XXX XXX
 device = 'cuda:0'
 
