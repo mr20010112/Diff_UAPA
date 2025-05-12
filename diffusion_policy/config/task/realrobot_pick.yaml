@@ -1,4 +1,4 @@
-name: real_image
+name: real_pick
 
 image_shape: [3, 1024, 1280]
 dataset_path: data/realrobot/expert

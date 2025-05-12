@@ -33,31 +33,6 @@ class Hdf5RealRobotDataset(BaseImageDataset):
         ):
         super().__init__()
 
-        # camera2robot_matrix = np.array([[ 0.992127, 0.016251, 0.124175, 0.306697],
-        # [-0.04194, -0.891172, 0.451723,-0.409919],
-        # [ 0.118002,-0.453375,-0.883474, 0.828481],
-        # [-0.0, 0.0, -0.0, 1.0]])
-        # # NEW VIEW
-        # camera2robot_matrix = np.array([[ 0.99754313, 0.0207489, 0.06691178, 0.30499173],
-        # [-0.01211929, -0.88961861, 0.45654336, -0.40985323],
-        # [ 0.06899874, -0.45623262, -0.88718148, 0.82828758],
-        # [-0.0, 0.0, -0.0, 1.0 ]])
-
-        # # NOTE: obtain the inverse matrix from robot_base to cam frame
-        # robot2camera_matrix = np.eye(4)
-        # R_mat = camera2robot_matrix[:3, :3]
-        # t_mat = camera2robot_matrix[:3, 3]
-        # R_inv = R_mat.T
-        # t_inv = -(R_inv @ t_mat)
-        # robot2camera_matrix[:3, :3] = R_inv
-        # robot2camera_matrix[:3, 3] = t_inv
-
-        # GRIPPER_LEN = 0.175
-        # GRIPPER_ROT = -np.pi/4
-
-        # GRIPPER_LEN = 0.175
-        # GRIPPER_ROT = np.pi/4
-
         def flatten_dataset_dict(d, parent_key='', sep='/'):
             items = []
             for k, v in d.items():
@@ -148,8 +123,8 @@ class Hdf5RealRobotDataset(BaseImageDataset):
 
     def get_normalizer(self, mode='limits', **kwargs):
         data = self.replay_buffer.data #To Do
-        image_keys = [k for k in data.keys() if "image" in k]
-        qpos_keys = [k for k in data.keys() if ("observation" in k) and ("image" not in k)]
+        image_keys = [k for k in data.keys() if "images" in k]
+        qpos_keys = [k for k in data.keys() if ("observations" in k) and ("images" not in k)]
 
 
         normalizer = LinearNormalizer()

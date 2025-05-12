@@ -28,7 +28,7 @@ def rechunk_recompress_array(group, name,
     
     if compressor is None:
         compressor = old_arr.compressor
-    
+       
     if (chunks == old_arr.chunks) and (compressor == old_arr.compressor):
         # no change
         return old_arr
@@ -566,9 +566,8 @@ class RealRobotReplayBuffer:
 
         observations = data['observations']
         action = data['action']
-        original_action_shape = action.shape
-        episode_len = original_action_shape[0]
         camera_keys = observations['images'].keys()
+        qpos_keys = [key for key in observations.keys() if key != 'images']
         compress_len = data['compress_len']
 
         # observation_data = []

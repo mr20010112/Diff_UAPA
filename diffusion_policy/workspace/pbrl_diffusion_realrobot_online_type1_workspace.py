@@ -68,7 +68,7 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
             if ckpt_path.is_file():
                 print(f"Resuming from checkpoint {ckpt_path}")
                 self.load_checkpoint(path=ckpt_path)
-            self.optimizer = self.optimizer = hydra.utils.instantiate( \
+            self.optimizer = hydra.utils.instantiate( \
                 cfg.optimizer, params=self.model.parameters())
             self.global_step = 0
             self.epoch = 0
@@ -292,26 +292,43 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
                         policy = self.ema_model
                     policy.eval()
 
-                    # run diffusion sampling on a training batch
                     if (self.epoch % cfg.training.sample_every) == 0:
                         with torch.no_grad():
                             # sample trajectory from training set, and evaluate difference
                             batch = dict_apply(train_sampling_batch, lambda x: x.to(device, non_blocking=True))
                             obs_dict = batch['obs']
+                            obs_dict_2 = batch['obs_2']
                             for key in obs_dict.keys():
                                 obs_dict[key] = obs_dict[key][:, :self.model.n_obs_steps, ...]
+
+                            for key in obs_dict_2.keys():
+                                obs_dict_2[key] = obs_dict_2[key][:, :self.model.n_obs_steps, ...]
+
                             gt_action = batch['action'][:, self.model.n_obs_steps:self.model.n_obs_steps+self.model.n_action_steps, ...]
+                            gt_action_2 = batch['action_2'][:, self.model.n_obs_steps:self.model.n_obs_steps+self.model.n_action_steps, ...]
                             
                             result = policy.predict_action(obs_dict)
-                            pred_action = result['action_pred']
+                            pred_action = result['action']
+
+                            result_2 = policy.predict_action(obs_dict_2)
+                            pred_action_2 = result_2['action']
+
                             mse = torch.nn.functional.mse_loss(pred_action, gt_action)
-                            step_log['train_action_mse_error'] = mse.item()
+                            mse_2 = torch.nn.functional.mse_loss(pred_action_2, gt_action_2)
+                            
+                            step_log['train_action_mse_error'] = (mse.item() + mse_2.item()) * 0.5
+
                             del batch
                             del obs_dict
                             del gt_action
                             del result
                             del pred_action
                             del mse
+                            del obs_dict_2
+                            del gt_action_2
+                            del result_2
+                            del pred_action_2
+                            del mse_2
                     
                     # checkpoint
                     if (self.epoch % cfg.training.checkpoint_every) == 0:

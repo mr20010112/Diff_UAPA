@@ -29,11 +29,6 @@ class RealRobotImageObsEncoder(ModuleAttrMixin):
         """
         super().__init__()
 
-        key_model_map = nn.ModuleDict()
-        key_transform_map = nn.ModuleDict()
-        key_shape_map = dict()
-
-
         rgb_keys = list()
         low_dim_keys = list()
         key_model_map = nn.ModuleDict()
@@ -169,6 +164,16 @@ class RealRobotImageObsEncoder(ModuleAttrMixin):
                 feature = self.key_model_map[key](img)
                 features.append(feature)
         
+        # process lowdim input
+        for key in self.low_dim_keys:
+            data = obs_dict[key]
+            if batch_size is None:
+                batch_size = data.shape[0]
+            else:
+                assert batch_size == data.shape[0]
+            assert data.shape[1:] == self.key_shape_map[key]
+            features.append(data)
+        
         # concatenate all features
         result = torch.cat(features, dim=-1)
         return result
@@ -182,7 +187,6 @@ class RealRobotImageObsEncoder(ModuleAttrMixin):
             shape = tuple(attr['shape'])
             this_obs = torch.zeros(
                 (batch_size,) + shape, 
-
                 dtype=self.dtype,
                 device=self.device)
             example_obs_dict[key] = this_obs

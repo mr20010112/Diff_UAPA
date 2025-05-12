@@ -263,6 +263,7 @@ class Pref_RealRobotReplayBuffer:
                             obs['images'][cam_name][idx, :int(compress_len[idx, 0])])
                 decompressed_images = list(results)
 
+
             decompressed_images = np.array(decompressed_images)
             decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
             decompressed_images = decompressed_images / 255.0

@@ -1,6 +1,8 @@
 {
     "version": "0.2.0",
     "configurations": [
+
+
         {
             "name": "Python 调试程序: 当前文件",
             "type": "python",
@@ -9,10 +11,10 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "--config-name=pbrl_diffusion_realrobot_online_workspace", 
+                "--config-name=train_diffusion_realrobot_workspace", 
             ],
             "env": {
-                "CUDA_VISIBLE_DEVICES": "0"
+                "CUDA_VISIBLE_DEVICES": "3"
             }
         }
     ]
