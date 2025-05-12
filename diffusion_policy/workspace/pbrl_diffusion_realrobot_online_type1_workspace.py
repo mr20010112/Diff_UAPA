@@ -67,7 +67,10 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
             ckpt_path = pathlib.Path(cfg.checkpoint_dir)
             if ckpt_path.is_file():
                 print(f"Resuming from checkpoint {ckpt_path}")
-                self.load_checkpoint(path=ckpt_path)
+                if cfg.exclude_keys is None:
+                    self.load_checkpoint(path=ckpt_path)
+                else:
+                    self.load_checkpoint(path=ckpt_path, exclude_keys=cfg.exclude_keys)
             self.optimizer = hydra.utils.instantiate( \
                 cfg.optimizer, params=self.model.parameters())
             self.global_step = 0
@@ -131,22 +134,22 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
 
-        for param_group in self.optimizer.param_groups:
-            if 'initial_lr' not in param_group:
-                param_group['initial_lr'] = cfg.optimizer.lr
+        # for param_group in self.optimizer.param_groups:
+        #     if 'initial_lr' not in param_group:
+        #         param_group['initial_lr'] = cfg.optimizer.lr
 
-        # configure lr scheduler
-        lr_scheduler = get_scheduler(
-            cfg.training.lr_scheduler,
-            optimizer=self.optimizer,
-            num_warmup_steps=cfg.training.lr_warmup_steps,
-            num_training_steps=(
-                len(train_dataloader) * cfg.training.num_epochs) \
-                    // cfg.training.gradient_accumulate_every,
-            # pytorch assumes stepping LRScheduler every epoch
-            # however huggingface diffusers steps it every batch
-            last_epoch=self.global_step-1
-        )
+        # # configure lr scheduler
+        # lr_scheduler = get_scheduler(
+        #     cfg.training.lr_scheduler,
+        #     optimizer=self.optimizer,
+        #     num_warmup_steps=cfg.training.lr_warmup_steps,
+        #     num_training_steps=(
+        #         len(train_dataloader) * cfg.training.num_epochs) \
+        #             // cfg.training.gradient_accumulate_every,
+        #     # pytorch assumes stepping LRScheduler every epoch
+        #     # however huggingface diffusers steps it every batch
+        #     last_epoch=self.global_step-1
+        # )
 
         # configure ema
         ema: EMAModel = None
@@ -216,8 +219,12 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
 
                 train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
 
-                self.optimizer = self.optimizer = hydra.utils.instantiate( \
+                self.optimizer = hydra.utils.instantiate( \
                     cfg.optimizer, params=self.model.parameters())
+
+                for param_group in self.optimizer.param_groups:
+                    if 'initial_lr' not in param_group:
+                        param_group['initial_lr'] = cfg.optimizer.lr
 
                 lr_scheduler = get_scheduler(
                     cfg.training.lr_scheduler,

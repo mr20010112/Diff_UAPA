@@ -5,13 +5,13 @@ defaults:
 name: train_diffusion_real_robot0
 _target_: diffusion_policy.workspace.train_diffusion_realrobot_workspace.TrainDiffusionRealRobotWorkspace
 
-checkpoint_dir: 'data/outputs/2025.05.12/18.44.09_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0015-train_action_mse_error=0.610.ckpt'
+checkpoint_dir: 'data/outputs/2025.05.13/01.12.59_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0005-train_action_mse_error=0.540.ckpt'
 exclude_keys: 'optimizer'
 
 shape_meta: ${task.shape_meta}
 exp_name: "default"
 
-stride: 1
+stride: 8
 horizon: 16
 n_obs_steps: 2
 n_action_steps: 8

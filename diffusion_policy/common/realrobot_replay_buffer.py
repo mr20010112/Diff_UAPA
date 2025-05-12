@@ -587,7 +587,7 @@ class RealRobotReplayBuffer:
             decompressed_images = []
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 results = executor.map(decode_image, \
-                            observations['images'][cam_name][:int(compress_len[0])])
+                            observations['images'][cam_name][:, :int(compress_len[0])])
                 decompressed_images = list(results)
 
             decompressed_images = np.array(decompressed_images)

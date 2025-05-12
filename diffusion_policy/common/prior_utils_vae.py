@@ -612,9 +612,9 @@ class RealRobotBetaNetwork(nn.Module):
                         for k in range(len(image_data_1)):
                             with concurrent.futures.ThreadPoolExecutor() as executor:
                                 results = executor.map(decode_image, \
-                                        image_data_1[k, :compress_len[k, 0]])
+                                        image_data_1[k, :, :compress_len[k, 0]])
                                 results_2 = executor.map(decode_image, \
-                                        image_data_2[k, :compress_len_2[k, 0]])
+                                        image_data_2[k, :, :compress_len_2[k, 0]])
                                 decompressed_image = list(results)
                                 decompressed_image_2 = list(results_2)
                                 decompressed_images.append(np.array(decompressed_image))
