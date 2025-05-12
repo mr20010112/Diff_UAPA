@@ -318,18 +318,8 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
                             
                             step_log['train_action_mse_error'] = (mse.item() + mse_2.item()) * 0.5
 
-                            del batch
-                            del obs_dict
-                            del gt_action
-                            del result
-                            del pred_action
-                            del mse
-                            del obs_dict_2
-                            del gt_action_2
-                            del result_2
-                            del pred_action_2
-                            del mse_2
-                    
+                            del batch, obs_dict, gt_action, result, pred_action, mse, obs_dict_2, gt_action_2, result_2, pred_action_2, mse_2
+
                     # checkpoint
                     if (self.epoch % cfg.training.checkpoint_every) == 0:
                         # checkpointing

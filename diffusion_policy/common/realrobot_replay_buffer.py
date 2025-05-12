@@ -595,9 +595,8 @@ class RealRobotReplayBuffer:
             decompressed_images = decompressed_images / 255.0
             obs_data.update({cam_name: decompressed_images.astype(np.float32)})
         
-        for key in observations.keys():
-            if key != 'images':
-                obs_data.update({key: observations[key].astype(np.float32)})
+        for key in qpos_keys:
+            obs_data.update({key: observations[key].astype(np.float32)})
     
         episode = {
             'obs': obs_data,

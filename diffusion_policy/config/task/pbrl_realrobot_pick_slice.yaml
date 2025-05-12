@@ -55,7 +55,7 @@ dataset_2:
   val_ratio: 0.00
 
 pref_dataset:
-  _target_: diffusion_policy.dataset.rlhf_realrobot_dataset.RLHF_RealRobotDataset
+  _target_: diffusion_policy.dataset.rlhf_realrobot_dataset.RLHF_RealRobotSliceDataset
   sequence_length: 50 #${task.env_runner.max_steps}
   horizon: ${horizon}
   stride: ${stride}

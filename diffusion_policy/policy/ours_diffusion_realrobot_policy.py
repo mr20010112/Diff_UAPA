@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, reduce
+from torch.distributions import Beta
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 
@@ -85,6 +86,7 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
         self.gamma = gamma
         self.beta = beta
         self.bias_reg = bias_reg
+        self.map_ratio = map_ratio
         self.kwargs = kwargs
 
         if num_inference_steps is None:
@@ -208,8 +210,12 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
 
         batch_size = batch['action'].shape[0]
         horizon = self.horizon
+
+        total_traj_loss, total_traj_loss_2 = 0.0, 0.0
+        total_immitation_loss = 0.0
+        total_loss = 0.0
         
-        def process_batch_data(obs, action):
+        def process_batch_data(obs, action, ref_policy:BaseImagePolicy=None):
             nobs = self.normalizer.normalize(obs)
             nactions = self.normalizer['action'].normalize(action)
             
@@ -221,17 +227,22 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
                 this_nobs = dict_apply(nobs, 
                     lambda x: x[:,:self.n_obs_steps,...].reshape(-1,*x.shape[2:]))
                 nobs_features = self.obs_encoder(this_nobs)
+                nobs_features_ref = ref_policy.obs_encoder(this_nobs)
                 # reshape back to B, Do
                 global_cond = nobs_features.reshape(batch_size, -1)
+                global_cond_ref = nobs_features_ref.reshape(batch_size, -1)
                 trajectory = nactions
                 cond_data = trajectory
             else:
                 # reshape B, T, ... to B*T
                 this_nobs = dict_apply(nobs, lambda x: x.reshape(-1, *x.shape[2:]))
                 nobs_features = self.obs_encoder(this_nobs)
+                nobs_features_ref = ref_policy.obs_encoder(this_nobs)
                 # reshape back to B, T, Do
                 nobs_features = nobs_features.reshape(batch_size, horizon, -1)
+                nobs_features_ref = nobs_features_ref.reshape(batch_size, horizon, -1)
                 cond_data = torch.cat([nactions, nobs_features], dim=-1)
+                cond_data_ref = torch.cat([nactions, nobs_features_ref], dim=-1)
                 trajectory = cond_data.detach()
                 
             condition_mask = self.mask_generator(trajectory.shape)
@@ -244,13 +255,18 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
             ).long()
             
             noisy_trajectory = self.noise_scheduler.add_noise(trajectory, noise, timesteps)
+            noisy_trajectory_ref = noisy_trajectory.clone()
             
             loss_mask = ~condition_mask
             
             noisy_trajectory[condition_mask] = cond_data[condition_mask]
+            noisy_trajectory_ref[condition_mask] = cond_data_ref[condition_mask]
             
             pred = self.model(noisy_trajectory, timesteps, 
                 local_cond=local_cond, global_cond=global_cond)
+            
+            pref_ref = ref_policy.model(noisy_trajectory_ref, timesteps, 
+                local_cond=local_cond, global_cond=global_cond_ref)
             
             pred_type = self.noise_scheduler.config.prediction_type 
             if pred_type == 'epsilon':
@@ -261,18 +277,31 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
                 raise ValueError(f"Unsupported prediction type {pred_type}")
             
             loss = F.mse_loss(pred, target, reduction='none')
+            loss_ref = F.mse_loss(pref_ref, target, reduction='none')
             loss = loss * loss_mask.type(loss.dtype)
+            loss_ref = loss_ref * loss_mask.type(loss.dtype)
             loss = reduce(loss, 'b t ... -> b t (...)', 'mean')
+            loss_ref = reduce(loss_ref, 'b t ... -> b t (...)', 'mean')
             
-            traj_loss = torch.sum(loss, dim=-1)
+            traj_loss = torch.sum((loss - loss_ref), dim=-1)
             
             del noise, noisy_trajectory, pred, target, loss, loss_mask
             torch.cuda.empty_cache()
             
             return traj_loss
 
-        votes_1 = batch["votes"].clone()
-        votes_2 = batch["votes_2"].clone()
+        
+        obs_1 = batch["obs_2"].to(self.device)
+        actions_1 = batch["action"].to(self.device)
+        votes_1 = batch["votes"].to(self.device)
+        beta_priori = batch["beta_priori"].to(self.device).detach()
+        obs_2 = batch["obs_2"].to(self.device)
+        actions_2 = batch["action_2"].to(self.device)
+        votes_2 = batch["votes_2"].to(self.device)
+        beta_priori_2 = batch["beta_priori_2"].to(self.device).detach()
+        save_avg_traj_loss = torch.tensor(avg_traj_loss, device=self.device).detach()
+
+        avg_traj_loss = save_avg_traj_loss
 
         threshold = 1e-2
         diff = torch.abs(votes_1 - votes_2)
@@ -286,30 +315,56 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
 
         mask = condition_2.squeeze(-1)
 
-        action_1 = batch["action"].clone()
-        action_2 = batch["action_2"].clone()
-        obs_1 = copy.deepcopy(batch["obs"])
-        obs_2 = copy.deepcopy(batch["obs"])
-
-        action_1[mask], action_2[mask] = action_2[mask], action_1[mask]
+        actions_1[mask], actions_2[mask] = actions_2[mask], actions_1[mask]
         obs_keys = obs_1.keys()
         for key in obs_keys:
             obs_1[key][mask], obs_2[key][mask] = obs_2[key][mask], obs_1[key][mask]
 
-        traj_loss = process_batch_data(obs_1, action_1)
+        # obs_1 = self.normalizer.normalize(obs_1)
+        # obs_2 = self.normalizer.normalize(obs_2)
+        # action_1 = self.normalizer['action'].normalize(action_1)
+        # action_2 = self.normalizer['action'].normalize(action_2)
+
+        for key in obs_keys:
+            obs_1[key] = slice_episode(obs_1[key], horizon=self.horizon, stride=stride)
+            obs_2[key] = slice_episode(obs_2[key], horizon=self.horizon, stride=stride)
+        action_1 = slice_episode(action_1, horizon=self.horizon, stride=stride)
+        action_2 = slice_episode(action_2, horizon=self.horizon, stride=stride)
+
+        for i in range(len(action_1)):
+            action_slide = action_1[i]
+            action_slide_2 = action_2[i]
+            obs_slide = {}
+            obs_slide_2 = {}
+            for key in obs_keys:
+                obs_slide[key] = obs_1[key][i]
+                obs_slide_2[key] = obs_2[key][i]
+
+            traj_loss = process_batch_data(obs_slide, action_slide)
+            traj_loss_2 = process_batch_data(obs_slide_2, action_slide_2)
+
+            immitation_loss = (traj_loss + traj_loss_2) / (len(action_1) + len(action_2))
+            
+            scale_factor = self.beta * self.noise_scheduler.config.num_train_timesteps
+            
+            traj_loss = -scale_factor * traj_loss
+            traj_loss_2 = -scale_factor * traj_loss_2
+            avg_traj_loss = -scale_factor* avg_traj_loss
+            
+            total_traj_loss += traj_loss
+            total_traj_loss_2 += traj_loss_2
+            total_immitation_loss += immitation_loss
         
-        traj_loss_2 = process_batch_data(obs_2, action_2)
-        
-        total_actions = action_1.size(0) + action_2.size(0)
-        scale_factor = self.beta * self.noise_scheduler.config.num_train_timesteps
-        
-        immitation_loss = torch.mean(traj_loss + traj_loss_2) / (self.horizon * total_actions)
-        
-        traj_loss = -scale_factor * traj_loss
-        traj_loss_2 = -scale_factor * traj_loss_2
-        
-        diff_term = traj_loss - traj_loss_2 + immitation_loss
-        diff_loss = torch.mean(torch.abs(diff_term))
-        mle_loss = -F.logsigmoid(diff_term)
-        
-        return torch.mean(mle_loss)
+        total_loss = -F.logsigmoid(total_traj_loss - total_traj_loss_2) + total_immitation_loss
+
+        if self.use_map:
+            beta_dist = Beta(beta_priori[:, 0], beta_priori[:, 1])
+            beta_dist_2 = Beta(beta_priori_2[:, 0], beta_priori_2[:, 1])
+
+            map_loss_1 = - beta_dist.log_prob(torch.clamp(torch.sigmoid(total_traj_loss - avg_traj_loss), min=1e-4, max=1-1e-4))
+
+            map_loss_2 = - beta_dist_2.log_prob(torch.clamp(torch.sigmoid(total_traj_loss_2 - avg_traj_loss), min=1e-4, max=1-1e-4))
+
+            total_loss += self.map_ratio * (map_loss_1 + map_loss_2)
+
+        return torch.mean(total_loss)

@@ -1,10 +1,10 @@
 defaults:
   - _self_
-  - task: pbrl_realrobot_pick
+  - task: pbrl_realrobot_pick_slice #pbrl_realrobot_pick_slice
 
 name: train_diffusion_realrobot
 _target_: diffusion_policy.workspace.pbrl_diffusion_realrobot_online_type1_workspace.PbrlDiffusionRealRobotWorkspace #_type1_, _type2_
-checkpoint_dir: 'data/outputs/2025.05.11/18.30.44_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0000-train_action_mse_error=0.568.ckpt'
+checkpoint_dir: 'data/outputs/2025.05.12/14.07.52_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0000-train_action_mse_error=0.536.ckpt'
 
 task_name: ${task.name}
 shape_meta: ${task.shape_meta}
@@ -82,7 +82,7 @@ dataloader:
   batch_size: 2
   num_workers: 8
   shuffle: True
-  pin_memory: False #True
+  pin_memory: True #True
   persistent_workers: True
 
 val_dataloader:

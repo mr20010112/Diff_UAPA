@@ -5,7 +5,7 @@ defaults:
 name: train_diffusion_real_robot0
 _target_: diffusion_policy.workspace.train_diffusion_realrobot_workspace.TrainDiffusionRealRobotWorkspace
 
-checkpoint_dir: 'data/outputs/2025.05.11/19.58.42_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0004-train_action_mse_error=0.516.ckpt'
+checkpoint_dir: 'data/outputs/2025.05.12/14.07.52_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0001-train_action_mse_error=0.590.ckpt'
 shape_meta: ${task.shape_meta}
 exp_name: "default"
 
@@ -98,7 +98,7 @@ training:
   device: "cuda:0"
   seed: 42
   debug: False
-  resume: False #True
+  resume: True #True
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 10
