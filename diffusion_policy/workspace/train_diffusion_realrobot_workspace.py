@@ -19,6 +19,7 @@ import wandb
 import tqdm
 import numpy as np
 import shutil
+import cv2
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 from diffusion_policy.policy.diffusion_realrobot_policy import DiffusionRealRobotPolicy
 from diffusion_policy.dataset.base_dataset import BaseImageDataset

@@ -533,9 +533,9 @@ class RealRobotBetaNetwork(nn.Module):
                 device = self.device,
             )
 
-        params = list(self.model.parameters()) + list(self.obs_encoder.parameters())
-        self.opt = torch.optim.Adam(params, lr=self.lr)
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.opt, mode='min', patience=10)
+        # params = list(self.model.parameters()) + list(self.obs_encoder.parameters())
+        # self.opt = torch.optim.Adam(params, lr=self.lr)
+        # self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.opt, mode='min', patience=10)
 
     def get_alpha_beta(self, x):
         alpha_beta = self.model(x).detach()
@@ -564,7 +564,11 @@ class RealRobotBetaNetwork(nn.Module):
 
             # Learning rate schedulers
             self.lr = lr
-            self.opt = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
+            self.opt = torch.optim.Adam(
+                params=self.model.parameters(), # list(self.model.parameters()) + list(self.obs_encoder.parameters()),
+                lr=self.lr, 
+                weight_decay=1e-5
+            )
             warm_up_scheduler = LinearLR(self.opt, start_factor=1e-8, end_factor=1.0, total_iters=warm_up_steps)
             cosine_scheduler = CosineAnnealingLR(self.opt, T_max=main_steps)
             self.scheduler = SequentialLR(self.opt, schedulers=[warm_up_scheduler, cosine_scheduler], milestones=[warm_up_steps])
@@ -578,8 +582,6 @@ class RealRobotBetaNetwork(nn.Module):
 
                 beta_loss_1 = []
                 beta_loss_2 = []
-                beta_loss_3 = []
-                beta_loss_4 = []
                 beta_loss_all = []
 
                 batch_shuffled_idx = np.random.permutation(dataset["action"].shape[0])
@@ -595,10 +597,8 @@ class RealRobotBetaNetwork(nn.Module):
                     batch["votes_2"] = dataset["votes_2"][indices]
                     batch['obs'] = {}
                     batch['obs_2'] = {}
-                    batch['obs']['images'] = {}
-                    batch['obs_2']['images'] = {}
-                    compress_len = dataset["compress_len"][indices].squeeze(-1)
-                    compress_len_2 = dataset["compress_len_2"][indices].squeeze(-1)
+                    compress_len = dataset["compress_len"][indices]
+                    compress_len_2 = dataset["compress_len_2"][indices]
 
                     for key in qpos_keys:
                         batch['obs'][key] = dataset["obs"][key][indices]
@@ -607,37 +607,42 @@ class RealRobotBetaNetwork(nn.Module):
                     for key in camera_keys:
                         image_data_1 = dataset["obs"]["images"][key][indices]
                         image_data_2 = dataset["obs_2"]["images"][key][indices]
-                        decompressed_images = []
-                        decompressed_images_2 = []
+                        batch_decompressed_images = []
+                        batch_decompressed_images_2 = []
                         for k in range(len(image_data_1)):
+                            img_data = image_data_1[k, :, :int(compress_len[k, 0])].copy()
+                            img_data_2 = image_data_2[k, :, :int(compress_len_2[k, 0])].copy()
                             with concurrent.futures.ThreadPoolExecutor() as executor:
-                                results = executor.map(decode_image, \
-                                        image_data_1[k, :, :compress_len[k, 0]])
-                                results_2 = executor.map(decode_image, \
-                                        image_data_2[k, :, :compress_len_2[k, 0]])
-                                decompressed_image = list(results)
-                                decompressed_image_2 = list(results_2)
-                                decompressed_images.append(np.array(decompressed_image))
-                                decompressed_images_2.append(np.array(decompressed_image_2))
+                                results = executor.map(decode_image, img_data)
+                                results_2 = executor.map(decode_image, img_data_2)
+                                decompressed_images = list(results)
+                                decompressed_images_2 = list(results_2)
+                            batch_decompressed_images.append(decompressed_images)
+                            batch_decompressed_images_2.append(decompressed_images_2)
                         
-                        decompressed_images = np.array(decompressed_images)
-                        decompressed_images = np.einsum('k h w c -> k c h w', decompressed_images)
-                        decompressed_images = decompressed_images / 255.0
+                        batch_decompressed_images = np.array(batch_decompressed_images)
+                        batch_decompressed_images = np.einsum('b k h w c -> b k c h w', batch_decompressed_images)
+                        batch_decompressed_images = batch_decompressed_images / 255.0
 
-                        decompressed_images_2 = np.array(decompressed_images_2)
-                        decompressed_images_2 = np.einsum('k h w c -> k c h w', decompressed_images_2)
-                        decompressed_images_2 = decompressed_images_2 / 255.0
+                        batch_decompressed_images_2 = np.array(batch_decompressed_images_2)
+                        batch_decompressed_images_2 = np.einsum('b k h w c -> b k c h w', batch_decompressed_images_2)
+                        batch_decompressed_images_2 = batch_decompressed_images_2 / 255.0
 
-                        batch['obs']['images'][key] = torch.from_numpy(decompressed_images).to(self.device)
-                        batch['obs_2']['images'][key] = torch.from_numpy(decompressed_images_2).to(self.device)
+                        batch['obs'][key] = batch_decompressed_images
+                        batch['obs_2'][key] = batch_decompressed_images_2
+                        del batch_decompressed_images, batch_decompressed_images_2, image_data_1, image_data_2
 
-                    batch = dict_apply(batch, torch.from_numpy)
+                    # batch = dict_apply(batch, torch.from_numpy)
 
                     # get batch
-                    obs_1 = self.normalizer.normalize(batch['obs'])  # batch_size * traj_len * obs_dim
-                    act_1 = self.normalizer['action'].normalize(batch['action']) # batch_size * traj_len * action_dim
+                    obs_1 = self.normalizer.normalize(batch['obs'])
+                    for key in obs_1.keys():
+                        obs_1[key] = obs_1[key].float()
+                    act_1 = self.normalizer['action'].normalize(batch['action']).float()
                     obs_2 = self.normalizer.normalize(batch['obs_2'])
-                    act_2 = self.normalizer['action_2'].normalize(batch['action_2'])
+                    for key in obs_2.keys():
+                        obs_2[key] = obs_2[key].float()
+                    act_2 = self.normalizer['action'].normalize(batch['action_2']).float()
 
                     this_nobs = dict_apply(obs_1, lambda x: x.reshape(-1, *x.shape[2:]))
                     nobs_features = self.obs_encoder(this_nobs)
@@ -647,8 +652,8 @@ class RealRobotBetaNetwork(nn.Module):
                     global_cond_2 = nobs_features_2.reshape(batch_size, sequence_length, -1)
 
                     
-                    s_a_1 = np.concatenate([global_cond, act_1], axis=-1)
-                    s_a_2 = np.concatenate([global_cond_2, act_2], axis=-1)
+                    s_a_1 = torch.cat([global_cond, act_1], dim=-1).to(self.device)
+                    s_a_2 = torch.cat([global_cond_2, act_2], dim=-1).to(self.device)
 
                     conditions_1 = [
                         np.all(batch['votes'] == 1, axis=1),
@@ -666,12 +671,12 @@ class RealRobotBetaNetwork(nn.Module):
                     values = [1, 0, 0]
                     single_labels_2 = torch.from_numpy(np.select(conditions_2, values)).float().to(self.device)
 
-                    pred_1_alpha_beta = self.model(torch.from_numpy(s_a_1).float().to(self.device)) # batch_size * 2
+                    pred_1_alpha_beta = self.model(s_a_1) # batch_size * 2
                     pred_1_alpha = pred_1_alpha_beta[:, 0]
                     pred_1_beta = pred_1_alpha_beta[:, 1]
 
 
-                    pred_2_alpha_beta = self.model(torch.from_numpy(s_a_2).float().to(self.device))
+                    pred_2_alpha_beta = self.model(s_a_2)
                     pred_2_alpha = pred_2_alpha_beta[:, 0]
                     pred_2_beta = pred_2_alpha_beta[:, 1]
                     # if equal, then discard
@@ -680,51 +685,13 @@ class RealRobotBetaNetwork(nn.Module):
                     loss_1 = torch.mean((torch.log(pred_1_alpha) + torch.log(pred_2_beta))* single_labels_1 \
                             + (torch.log(pred_2_alpha) + torch.log(pred_1_beta)) * single_labels_2)
 
-                    # var_1 = (pred_1_alpha * pred_1_beta) / ((pred_1_alpha + pred_1_beta) ** 2 * (pred_1_alpha + pred_1_beta + 1))
-                    
-                    # var_2 = (pred_2_alpha * pred_2_beta) / ((pred_2_alpha + pred_2_beta) ** 2 * (pred_2_alpha + pred_2_beta + 1))
-
-                    # loss_2 = (torch.clamp(torch.mean(torch.sqrt(var_1)) - torch.sqrt(torch.tensor(1 / 324, dtype=torch.float32, device=self.device)), min=0)) ** 2 \
-                    #         + (torch.clamp(torch.mean(torch.sqrt(var_2)) - torch.sqrt(torch.tensor(1 / 324, dtype=torch.float32, device=self.device)), min=0)) ** 2
-                    loss_2 = torch.mean(torch.clamp(pred_1_alpha - 25, min=0) ** 2) + torch.mean(torch.clamp(pred_2_alpha - 25, min=0) ** 2) \
-                            + torch.mean(torch.clamp(pred_1_beta - 25, min=0) ** 2) + torch.mean(torch.clamp(pred_2_beta - 25, min=0) ** 2)
-                    
-                    # loss_3 = torch.log(4 / pred_1_alpha.std()) + (pred_1_alpha.var() + (pred_1_alpha.mean() - 12.5) ** 2) / (2 * 16) -0.5 \
-                    #         + torch.log(4 / pred_2_alpha.std()) + (pred_2_alpha.var() + (pred_2_alpha.mean() - 12.5) ** 2) / (2 * 16) -0.5 \
-                    #         + torch.log(4 / pred_1_beta.std()) + (pred_1_beta.var() + (pred_1_beta.mean() - 12.5) ** 2) / (2 * 16) -0.5 \
-                    #         + torch.log(4 / pred_2_beta.std()) + (pred_2_beta.var() + (pred_2_beta.mean() - 12.5) ** 2) / (2 * 16) -0.5
-
-                    controls_alpha_1 = torch.distributions.Normal(torch.mean(single_labels_1) * 12.5, \
-                                        (12.5 / 3) * torch.mean(single_labels_1)).rsample((pred_1_alpha.shape[0],))
-                    controls_alpha_1 = torch.sort(controls_alpha_1, dim=0)[0].to(self.device)
-
-                    controls_alpha_2 = torch.distributions.Normal(torch.mean(single_labels_2) * 12.5, \
-                                        (12.5 / 3) * torch.mean(single_labels_2)).rsample((pred_2_alpha.shape[0],))
-                    controls_alpha_2 = torch.sort(controls_alpha_2, dim=0)[0].to(self.device)
-
-                    controls_beta_1 = torch.distributions.Normal(torch.mean(single_labels_2) * 12.5, \
-                                        (12.5 / 3) * torch.mean(single_labels_2)).rsample((pred_2_alpha.shape[0],))
-                    controls_beta_1 = torch.sort(controls_beta_1, dim=0)[0].to(self.device)
-
-                    controls_beta_2 = torch.distributions.Normal(torch.mean(single_labels_1) * 12.5, \
-                                        (12.5 / 3) * torch.mean(single_labels_1)).rsample((pred_1_alpha.shape[0],))
-                    controls_beta_2 = torch.sort(controls_beta_2, dim=0)[0].to(self.device)
-
-                    loss_3 = torch.mean((torch.sort(pred_1_alpha, dim=0)[0] - controls_alpha_1) ** 2) \
-                            + torch.mean((torch.sort(pred_2_alpha, dim=0)[0] - controls_alpha_2) ** 2) \
-                            + torch.mean((torch.sort(pred_1_beta, dim=0)[0] - controls_beta_1) ** 2) \
-                            + torch.mean((torch.sort(pred_2_beta, dim=0)[0] - controls_beta_2) ** 2)
-
-                    loss_4 = self.kl_regularizer_loss(pred_1_alpha.shape[0], alpha=pred_1_alpha, beta=pred_1_beta) \
+                    loss_2 = self.kl_regularizer_loss(pred_1_alpha.shape[0], alpha=pred_1_alpha, beta=pred_1_beta) \
                             + self.kl_regularizer_loss(pred_2_alpha.shape[0], alpha=pred_2_alpha, beta=pred_2_beta)
 
-                    beta_loss = -loss_1 + loss_2 + loss_3 + self.beta_coef*loss_4
+                    beta_loss = -loss_1 + self.beta_coef*loss_2
 
                     beta_loss_1.append(loss_1)
                     beta_loss_2.append(loss_2)
-                    beta_loss_3.append(loss_3)
-                    beta_loss_4.append(loss_4)
-
                     beta_loss_all.append(beta_loss)
 
                     self.opt.zero_grad()
@@ -737,14 +704,10 @@ class RealRobotBetaNetwork(nn.Module):
 
                 beta_loss_1 = torch.stack(beta_loss_1, dim=0)
                 beta_loss_2 = torch.stack(beta_loss_2, dim=0)
-                beta_loss_3 = torch.stack(beta_loss_3, dim=0)
-                beta_loss_4 = torch.stack(beta_loss_4, dim=0)
                 beta_loss_all = torch.stack(beta_loss_all, dim=0)
                 print("iteration:", epoch + 1)
                 print("mean_beta_loss_data:", torch.mean(beta_loss_1).item())
-                print("mean_beta_loss_control:", torch.mean(beta_loss_2).item())
-                print("mean_beta_loss_control_2:", torch.mean(beta_loss_3).item())
-                print("mean_beta_loss_kl:", torch.mean(beta_loss_4).item())
+                print("mean_beta_loss_kl:", torch.mean(beta_loss_2).item())
                 print("mean_beta_loss_all:", torch.mean(beta_loss_all).item())
 
                 if save_dir is not None and (epoch+1) % 200 == 0:

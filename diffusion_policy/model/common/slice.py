@@ -1,24 +1,23 @@
 import torch
 import numpy as np
 
-def slice_episode(episode, horizon, stride):
-
+def slice_episode(episode, horizon, stride, start=0):
     is_torch = hasattr(episode, 'cuda')
         
     shape = episode.shape
     N, T = shape[:2] 
-    feature_dim =shape[2:]
+    feature_dim = shape[2:]
 
     sliced_fragments = []
 
-    for start in range(0, T, stride):
-        end = start + horizon
+    for current_start in range(start, T, stride):
+        end = current_start + horizon
 
         if end > T:
-            start = max(0, T - horizon)
+            current_start = max(0, T - horizon)
             end = T
 
-        fragment = episode[:, start:end, ...]
+        fragment = episode[:, current_start:end, ...]
         sliced_fragments.append(fragment)
 
         if end == T:

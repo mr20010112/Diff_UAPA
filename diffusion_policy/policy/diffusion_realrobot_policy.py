@@ -1,4 +1,5 @@
 from typing import Dict
+import random
 import copy
 import torch
 import torch.nn as nn
@@ -196,14 +197,16 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
     def compute_loss(self, batch, stride=1):
         # normalize input
         #assert 'valid_mask' not in batch
-        obs = copy.deepcopy(batch['obs'])
+        obs = {k: v.clone() for k, v in batch['obs'].items()}
         action = batch['action'].clone()
         batch_size = action.shape[0]
         horizon = self.horizon
         total_loss = 0
+        start = random.randint(0, self.n_obs_steps)
+
         for key in obs.keys():
-            obs[key] = slice_episode(obs[key], horizon, stride)
-        action = slice_episode(action, horizon, stride)
+            obs[key] = slice_episode(obs[key], horizon, stride, start)
+        action = slice_episode(action, horizon, stride, start)
 
         for i in range(len(action)):
             obs_slide = {}
@@ -274,4 +277,5 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
             loss = reduce(loss, 'b ... -> b (...)', 'mean')
             loss = loss.mean()
             total_loss += loss
-            return total_loss / len(action)
+            
+        return total_loss / len(action)
