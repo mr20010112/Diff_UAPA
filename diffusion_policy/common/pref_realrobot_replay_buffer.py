@@ -260,7 +260,7 @@ class Pref_RealRobotReplayBuffer:
             decompressed_images = []
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 results = executor.map(decode_image, \
-                            obs['images'][cam_name][idx, :int(compress_len[idx, 0])])
+                            obs['images'][cam_name][idx, :, :int(compress_len[idx, 0])])
                 decompressed_images = list(results)
 
 
@@ -278,7 +278,7 @@ class Pref_RealRobotReplayBuffer:
             decompressed_images = []
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 results = executor.map(decode_image, \
-                            obs_2['images'][cam_name][idx, :int(compress_len_2[idx, 0])])
+                            obs_2['images'][cam_name][idx, :, :int(compress_len_2[idx, 0])])
                 decompressed_images = list(results)
 
             decompressed_images = np.array(decompressed_images)
@@ -343,7 +343,7 @@ class Pref_RealRobotReplayBuffer:
             decompressed_images = []
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 results = executor.map(decode_image, \
-                            obs['images'][cam_name][local_idx, traj_idx, :int(compress_len[local_idx, traj_idx, 0])])
+                            obs['images'][cam_name][local_idx, traj_idx, :, :int(compress_len[local_idx, traj_idx, 0])])
                 decompressed_images = list(results)
 
             decompressed_images = np.array(decompressed_images)
@@ -360,7 +360,7 @@ class Pref_RealRobotReplayBuffer:
             decompressed_images = []
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 results = executor.map(decode_image, \
-                            obs_2['images'][cam_name][local_idx, traj_idx, :int(compress_len_2[local_idx, traj_idx, 0])])
+                            obs_2['images'][cam_name][local_idx, traj_idx, :, :int(compress_len_2[local_idx, traj_idx, 0])])
                 decompressed_images = list(results)
 
             decompressed_images = np.array(decompressed_images)
