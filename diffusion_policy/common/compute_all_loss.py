@@ -113,15 +113,15 @@ def compute_all_traj_loss(replay_buffer=None, model:BaseImagePolicy=None, ref_mo
         return torch.mean(loss)
     
 
-def compute_all_traj_loss_realrobot(obs_keys, replay_buffer=None, model=None, ref_model=None, stride=1):
+def compute_all_traj_loss_realrobot(replay_buffer=None, model=None, ref_model=None, stride=1):
     if replay_buffer is None:
         return np.zeros([1])
     else:
         data = replay_buffer.data
         meta_data = replay_buffer.meta
-        observations_1 = {key:data[key].to(model.device) for key in obs_keys}
+        observations_1 = {key:data[key].to(model.device) for key in observations_1.keys()}
         actions_1 = np.array(data['action'], dtype=np.float32)
-        observations_2 = {key:data[key].to(model.device) for key in obs_keys}
+        observations_2 = {key:data[key].to(model.device) for key in observations_2.keys()}
         actions_2 = np.array(data['action_2'], dtype=np.float32)
         length_1 = torch.tensor(meta_data['length'], device=model.device)
         length_2 = torch.tensor(meta_data['length_2'], device=model.device)

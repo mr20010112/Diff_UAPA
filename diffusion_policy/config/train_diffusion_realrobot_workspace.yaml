@@ -5,7 +5,7 @@ defaults:
 name: train_diffusion_real_robot0
 _target_: diffusion_policy.workspace.train_diffusion_realrobot_workspace.TrainDiffusionRealRobotWorkspace
 
-checkpoint_dir: 'data/outputs/2025.05.14/12.13.54_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0000-train_action_mse_error=0.353.ckpt'
+checkpoint_dir: 'data/outputs/2025.05.14/21.30.53_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0000-train_action_mse_error=0.066.ckpt'
 exclude_keys: 'optimizer'
 
 shape_meta: ${task.shape_meta}
@@ -92,7 +92,7 @@ val_dataloader:
 
 optimizer:
   _target_: torch.optim.AdamW
-  lr: 1.0e-4 #1.0e-4
+  lr: 1.0e-5 
   betas: [0.95, 0.999]
   eps: 1.0e-8
   weight_decay: 1.0e-6
@@ -104,8 +104,8 @@ training:
   resume: True #True
   # optimization
   lr_scheduler: cosine
-  lr_warmup_steps: 50
-  num_epochs: 61
+  lr_warmup_steps: 500
+  num_epochs: 31
   gradient_accumulate_every: 1
   # EMA destroys performance when used with BatchNorm
   # replace BatchNorm with GroupNorm.

@@ -13,6 +13,7 @@ from tqdm import tqdm
 import torch.nn.functional as F
 from pathlib import Path
 from torch.optim.lr_scheduler import SequentialLR, LinearLR, CosineAnnealingLR
+from diffusion_policy.dataset.base_dataset import BaseImageDataset
 from diffusion_policy.model.vision.realrobot_image_obs_encoder import RealRobotImageObsEncoder
 from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.model.common.normalizer import LinearNormalizer
@@ -552,7 +553,7 @@ class RealRobotBetaNetwork(nn.Module):
         return analytical_kld_loss
 
 
-    def fit_data(self, dataset, save_dir=None, load_dir=None, num_epochs=1, warm_up_epochs=0, batch_size=1, lr=1.0e-5):
+    def fit_data(self, dataset:BaseImageDataset=None, save_dir=None, load_dir=None, num_epochs=1, warm_up_epochs=0, batch_size=1, lr=1.0e-5):
         def decode_image(data):
             return cv2.imdecode(data, 1)
         
@@ -720,7 +721,7 @@ class RealRobotBetaNetwork(nn.Module):
                 print("mean_beta_loss_all:", torch.mean(beta_loss_all).item())
                 print("current_learning_rate:", self.opt.param_groups[0]['lr'])
 
-                if save_dir is not None and (epoch+1) % 10 == 0:
+                if save_dir is not None and (epoch+1) % 5 == 0:
                     tmp_save_dir= Path(save_dir) / f'itr_{epoch+1}'
                     tmp_save_dir.mkdir(parents=True, exist_ok=True)
                     model_file = tmp_save_dir / 'beta_model.pth'

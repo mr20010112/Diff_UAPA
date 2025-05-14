@@ -12,6 +12,8 @@ from pathlib import Path
 from omegaconf import OmegaConf
 from hydra.utils import instantiate
 from tqdm import tqdm
+import concurrent.futures
+import cv2
 from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.common.replay_buffer import ReplayBuffer
 from diffusion_policy.common.sampler import SequenceSampler, get_val_mask
@@ -212,8 +214,25 @@ class RLHF_RealRobotDataset(BaseImageDataset):
             obs_encoder=obs_encoder,
             normalizer=normalizer,
         )
+
     def update_beta_priori(self, batch_size=3):
 
+        def unflatten_dataset_dict(flat_dict, delimiter='/'):
+            result = {}
+            for compound_key, value in flat_dict.items():
+                keys = compound_key.split(delimiter)
+                current = result
+                for key in keys[:-1]:
+                    if key not in current:
+                        current[key] = {}
+                    current = current[key]
+                current[keys[-1]] = value
+            
+            return result
+        
+        def decode_image(data):
+            return cv2.imdecode(data, 1)
+        
         def scale_to_range(x, min_val, max_val, target_min=1, target_max=10):
 
             if min_val == max_val:
@@ -221,6 +240,7 @@ class RLHF_RealRobotDataset(BaseImageDataset):
             return target_min + (x - min_val) * (target_max - target_min) / (max_val - min_val)
 
         # Define unified scaling logic
+
         def scale_tensor(x, global_min, global_max, target_min=1, target_max=10):
 
             # Ensure the tensor is a floating-point tensor
@@ -245,58 +265,146 @@ class RLHF_RealRobotDataset(BaseImageDataset):
 
             # Apply scaling
             return scale_to_range(x, local_min, local_max, scaled_min, scaled_max)
+        
+        with torch.no_grad():
+            data = self.pref_replay_buffer.data
+            data = unflatten_dataset_dict(flat_dict=data)
 
-        obs_1 = self.pref_replay_buffer.data['obs']
-        obs_2 = self.pref_replay_buffer.data['obs_2']
-        action_1 = self.pref_replay_buffer.data['action']
-        action_2 = self.pref_replay_buffer.data['action_2']
-        s_a_1 = np.concatenate([obs_1, action_1], axis=-1)
-        s_a_2 = np.concatenate([obs_2, action_2], axis=-1)
+            obs_1 = data['obs']
+            obs_2 = data['obs_2']
+            action_1 = data['action']
+            action_2 = data['action_2']
+            compress_len = data["compress_len"]
+            compress_len_2 = data["compress_len_2"]
+            votes_1 = self.pref_replay_buffer.meta["votes"]
+            votes_2 = self.pref_replay_buffer.meta["votes_2"]
+            del data
 
-        interval = math.ceil(s_a_1.shape[0] / batch_size)
-        alpha, beta = [], []
-        alpha_2, beta_2 = [], []
-        for i in range(interval):
-            start_pt = i * batch_size
-            end_pt = min((i + 1) * batch_size, s_a_1.shape[0])
-            batch_s_a_1 = s_a_1[start_pt:end_pt, ...]
-            batch_s_a_2 = s_a_2[start_pt:end_pt, ...]
+            qpos_keys = [key for key in obs_1.keys() if key != 'images']
+            camera_keys = obs_1["images"].keys()
 
-            batch_alpha, batch_beta = self.beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_1).float().to(self.beta_model.device))
-            batch_alpha_2, batch_beta_2 = self.beta_model.get_alpha_beta(torch.from_numpy(batch_s_a_2).float().to(self.beta_model.device))
+            interval = math.ceil(action_1.shape[0] / batch_size)
 
-            alpha.append(batch_alpha)
-            beta.append(batch_beta)
-            alpha_2.append(batch_alpha_2)
-            beta_2.append(batch_beta_2)
+            alpha = []
+            beta = []
+            alpha_2 = []
+            beta_2 = []
+            for i in tqdm(range(interval), desc="Updating beta priori"):
+                start_pt = i * batch_size
+                end_pt = min((i + 1) * batch_size, action_1.shape[0])
+                indices = np.arange(start_pt, end_pt)
+                
+                batch_compress_len = compress_len[indices]
+                batch_compress_len_2 = compress_len_2[indices]
+                
+                batch_act_1 = torch.from_numpy(action_1[indices]).float()
+                batch_act_2 = torch.from_numpy(action_2[indices]).float()
+                batch_votes_1 = torch.from_numpy(votes_1[indices]).float()
+                batch_votes_2 = torch.from_numpy(votes_2[indices]).float()
+                
+                batch_obs_1 = {}
+                batch_obs_2 = {}
+                
+                for key in qpos_keys:
+                    batch_obs_1[key] = torch.from_numpy(obs_1[key][indices]).float()
+                    batch_obs_2[key] = torch.from_numpy(obs_2[key][indices]).float()
 
-        alpha = torch.cat(alpha, dim=0)+1
-        beta = torch.cat(beta, dim=0)+1
-        alpha_2 = torch.cat(alpha_2, dim=0)+1
-        beta_2 = torch.cat(beta_2, dim=0)+1
+                for key in camera_keys:
+                    batch_image_data_1 = obs_1["images"][key][indices]
+                    batch_decompressed_images_1 = []
+                    
+                    for k in range(len(batch_image_data_1)):
+                        img_data = batch_image_data_1[k, :, :int(batch_compress_len[k, 0])].copy()
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            results = executor.map(decode_image, img_data)
+                            decompressed_images = list(results)
+                        batch_decompressed_images_1.append(decompressed_images)
+                    
+                    batch_decompressed_images_1 = np.array(batch_decompressed_images_1)
+                    batch_decompressed_images_1 = np.einsum('b k h w c -> b k c h w', batch_decompressed_images_1)
+                    batch_obs_1[key] = torch.from_numpy(batch_decompressed_images_1 / 255.0).float()
+                    
+                    del batch_decompressed_images_1, batch_image_data_1
+                    
+                    batch_image_data_2 = obs_2["images"][key][indices]
+                    batch_decompressed_images_2 = []
+                    
+                    for k in range(len(batch_image_data_2)):
+                        img_data_2 = batch_image_data_2[k, :, :int(batch_compress_len_2[k, 0])].copy()
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            results_2 = executor.map(decode_image, img_data_2)
+                            decompressed_images_2 = list(results_2)
+                        batch_decompressed_images_2.append(decompressed_images_2)
+                    
+                    batch_decompressed_images_2 = np.array(batch_decompressed_images_2)
+                    batch_decompressed_images_2 = np.einsum('b k h w c -> b k c h w', batch_decompressed_images_2)
+                    batch_obs_2[key] = torch.from_numpy(batch_decompressed_images_2 / 255.0).float()
+                    
+                    del batch_decompressed_images_2, batch_image_data_2
 
-        mean_value = torch.mean(torch.cat([alpha, beta, alpha_2, beta_2]))
-        std_value = torch.std(torch.cat([alpha, beta, alpha_2, beta_2]))
+                batch_obs_1 = self.beta_model.normalizer.normalize(batch_obs_1)
+                for key in batch_obs_1.keys():
+                    batch_obs_1[key] = batch_obs_1[key].to(self.beta_model.device)
+                
+                batch_act_1 = self.beta_model.normalizer['action'].normalize(batch_act_1).to(self.beta_model.device)
+                
+                this_nobs_1 = dict_apply(batch_obs_1, lambda x: x.reshape(-1, *x.shape[2:]))
+                nobs_features_1 = self.beta_model.obs_encoder(this_nobs_1)
+                global_cond_1 = nobs_features_1.reshape(batch_size, self.sequence_length, -1)
+                
+                batch_s_a_1 = torch.cat([global_cond_1, batch_act_1], dim=-1)
+                del this_nobs_1, nobs_features_1, global_cond_1, batch_obs_1, batch_act_1
 
-        alpha = torch.clamp(alpha, max=mean_value+3*std_value)
-        beta = torch.clamp(beta, max=mean_value+3*std_value)
-        alpha_2 = torch.clamp(alpha_2, max=mean_value+3*std_value)
-        beta_2 = torch.clamp(beta_2, max=mean_value+3*std_value)
+                
+                batch_obs_2 = self.beta_model.normalizer.normalize(batch_obs_2)
+                for key in batch_obs_2.keys():
+                    batch_obs_2[key] = batch_obs_2[key].to(self.beta_model.device)
+                
+                batch_act_2 = self.beta_model.normalizer['action'].normalize(batch_act_2).to(self.beta_model.device)
+                
+                this_nobs_2 = dict_apply(batch_obs_2, lambda x: x.reshape(-1, *x.shape[2:]))
+                nobs_features_2 = self.beta_model.obs_encoder(this_nobs_2)
+                global_cond_2 = nobs_features_2.reshape(batch_size, self.sequence_length, -1)
+                
+                batch_s_a_2 = torch.cat([global_cond_2, batch_act_2], dim=-1)
+                del this_nobs_2, nobs_features_2, global_cond_2, batch_obs_2, batch_act_2
+                
+                batch_alpha, batch_beta = self.beta_model.get_alpha_beta(batch_s_a_1.float().to(self.beta_model.device))
+                batch_alpha_2, batch_beta_2 = self.beta_model.get_alpha_beta(batch_s_a_2.float().to(self.beta_model.device))
 
-        max_value = torch.max(torch.cat([alpha, beta, alpha_2, beta_2]))
-        min_value = torch.min(torch.cat([alpha, beta, alpha_2, beta_2]))
+                alpha.append(batch_alpha)
+                beta.append(batch_beta)
+                alpha_2.append(batch_alpha_2)
+                beta_2.append(batch_beta_2)
 
-        target_min, target_max = 1, 10
+            alpha = torch.cat(alpha, dim=0)+1
+            beta = torch.cat(beta, dim=0)+1
+            alpha_2 = torch.cat(alpha_2, dim=0)+1
+            beta_2 = torch.cat(beta_2, dim=0)+1
 
-        alpha = scale_tensor(alpha, min_value, max_value, target_min, target_max)
-        beta = scale_tensor(beta, min_value, max_value, target_min, target_max)
-        alpha_2 = scale_tensor(alpha_2, min_value, max_value, target_min, target_max)
-        beta_2 = scale_tensor(beta_2, min_value, max_value, target_min, target_max)
+            mean_value = torch.mean(torch.cat([alpha, beta, alpha_2, beta_2]))
+            std_value = torch.std(torch.cat([alpha, beta, alpha_2, beta_2]))
 
-        self.pref_replay_buffer.meta['beta_priori'] = np.array([alpha.cpu().numpy(), beta.cpu().numpy()]).T
-        self.pref_replay_buffer.meta['beta_priori_2'] = np.array([alpha_2.cpu().numpy(), beta_2.cpu().numpy()]).T
-        self.pref_replay_buffer.root['meta']['beta_priori'] = np.array([alpha.cpu().numpy(), beta.cpu().numpy()]).T
-        self.pref_replay_buffer.root['meta']['beta_priori_2'] = np.array([alpha_2.cpu().numpy(), beta_2.cpu().numpy()]).T
+            alpha = torch.clamp(alpha, max=mean_value+3*std_value)
+            beta = torch.clamp(beta, max=mean_value+3*std_value)
+            alpha_2 = torch.clamp(alpha_2, max=mean_value+3*std_value)
+            beta_2 = torch.clamp(beta_2, max=mean_value+3*std_value)
+
+            max_value = torch.max(torch.cat([alpha, beta, alpha_2, beta_2]))
+            min_value = torch.min(torch.cat([alpha, beta, alpha_2, beta_2]))
+
+            target_min, target_max = 1, 2
+
+            alpha = scale_tensor(alpha, min_value, max_value, target_min, target_max)
+            beta = scale_tensor(beta, min_value, max_value, target_min, target_max)
+            alpha_2 = scale_tensor(alpha_2, min_value, max_value, target_min, target_max)
+            beta_2 = scale_tensor(beta_2, min_value, max_value, target_min, target_max)
+
+            self.pref_replay_buffer.meta['beta_priori'] = np.array([alpha.cpu().numpy(), beta.cpu().numpy()]).T
+            self.pref_replay_buffer.meta['beta_priori_2'] = np.array([alpha_2.cpu().numpy(), beta_2.cpu().numpy()]).T
+            self.pref_replay_buffer.root['meta']['beta_priori'] = np.array([alpha.cpu().numpy(), beta.cpu().numpy()]).T
+            self.pref_replay_buffer.root['meta']['beta_priori_2'] = np.array([alpha_2.cpu().numpy(), beta_2.cpu().numpy()]).T
+
 
     def get_validation_dataset(self):
         val_set = copy.copy(self)

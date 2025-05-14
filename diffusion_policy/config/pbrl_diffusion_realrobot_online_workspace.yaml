@@ -5,7 +5,7 @@ defaults:
 name: train_diffusion_realrobot
 _target_: diffusion_policy.workspace.pbrl_diffusion_realrobot_online_type1_workspace.PbrlDiffusionRealRobotWorkspace #_type1_, _type2_
 
-checkpoint_dir: 'data/outputs/2025.05.13/21.29.46_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0006-train_action_mse_error=0.612.ckpt'
+checkpoint_dir: 'data/outputs/2025.05.14/22.04.13_train_diffusion_real_robot0_real_robot/checkpoints/epoch=0004-train_action_mse_error=0.047.ckpt'
 exclude_keys: 'optimizer'
 
 task_name: ${task.name}
@@ -50,8 +50,8 @@ policy:
       weights: null
     resize_shape: [1024, 1280] # [1024, 1280]
     crop_shape: [922, 1152] # [922, 1152]
-    random_crop: False #True
-    use_group_norm: False #True
+    random_crop: True
+    use_group_norm: True
     share_rgb_model: False
     imagenet_norm: True
 
