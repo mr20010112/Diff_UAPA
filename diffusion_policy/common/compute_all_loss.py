@@ -167,6 +167,7 @@ def compute_all_traj_loss_realrobot(obs_keys, replay_buffer=None, model=None, re
 
                 local_cond = None
                 global_cond = None
+                global_cond_ref = None
                 if model.obs_as_global_cond:
                     # reshape B, T, ... to B*T
                     this_nobs = dict_apply(nobs, 
@@ -220,8 +221,10 @@ def compute_all_traj_loss_realrobot(obs_keys, replay_buffer=None, model=None, re
                     noisy_trajectory[condition_mask] = trajectory[condition_mask]
                     noisy_trajectory_ref[condition_mask] = cond_data_ref[condition_mask]
 
-                    ref_pred = ref_policy.model(noisy_trajectory, timestep, cond)
-                    pred = model.model(noisy_trajectory, timestep, cond)
+                    ref_pred = ref_model.model(noisy_trajectory_ref, timesteps, 
+                        local_cond=local_cond, global_cond=global_cond_ref)
+                    pred = model.model(noisy_trajectory, timesteps, 
+                        local_cond=local_cond, global_cond=global_cond)
 
                     mask = (model.horizon + (idx - 1)*stride) <= length
                     mask = mask.int()

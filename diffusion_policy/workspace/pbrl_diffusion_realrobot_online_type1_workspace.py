@@ -28,7 +28,7 @@ from diffusion_policy.common.json_logger import JsonLogger
 from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
 from diffusion_policy.model.diffusion.ema_model import EMAModel
 from diffusion_policy.model.common.lr_scheduler import get_scheduler
-from diffusion_policy.common.compute_all_loss import compute_all_traj_image_loss
+from diffusion_policy.common.compute_all_loss import compute_all_traj_loss_realrobot
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
@@ -255,8 +255,8 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
                             # compute loss
                             avg_traj_loss = 0.0
                             if cfg.training.map.use_map:
-                                avg_traj_loss = compute_all_traj_image_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
-                                                                      model = self.model, ref_model = ref_policy.model, stride=cfg.stride)
+                                # avg_traj_loss = compute_all_traj_loss_realrobot(replay_buffer = pref_dataset.pref_replay_buffer, \
+                                #                                       model = self.model, ref_model = ref_policy.model, stride=cfg.stride) #change
                             raw_loss = self.model.compute_loss(batch, stride=cfg.stride, ref_model=ref_policy, avg_traj_loss=avg_traj_loss)
                             loss = raw_loss / cfg.training.gradient_accumulate_every
                             loss.backward()

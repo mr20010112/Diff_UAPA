@@ -7,3 +7,5 @@ __pycache__/
 *.pyd
 *.py[cod]
 *.ckpt
+
+.vscode/launch.json
