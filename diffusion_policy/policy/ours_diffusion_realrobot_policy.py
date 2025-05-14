@@ -233,6 +233,7 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
                 global_cond_ref = nobs_features_ref.reshape(batch_size, -1)
                 trajectory = nactions
                 cond_data = trajectory
+                cond_data_ref = trajectory
             else:
                 # reshape B, T, ... to B*T
                 this_nobs = dict_apply(nobs, lambda x: x.reshape(-1, *x.shape[2:]))

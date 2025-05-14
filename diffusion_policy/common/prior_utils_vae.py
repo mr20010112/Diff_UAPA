@@ -506,7 +506,7 @@ class RealRobotBetaNetwork(nn.Module):
         self.lr = lr
         self.beta_coef = beta_coef
         self.device = device
-        self.obs_encoder = obs_encoder
+        self.obs_encoder = obs_encoder.to(self.device)
         self.normalizer = normalizer
 
         if 'Causal' in model_type:
@@ -521,8 +521,8 @@ class RealRobotBetaNetwork(nn.Module):
         elif 'Transformer' in model_type:
             self.model = TransformerBetaModel(
                 data_dim = self.observation_dim + self.action_dim,
-                embedding_dim = 256,
-                nhead = 4,
+                embedding_dim = 512,
+                nhead = 16,
                 num_encoder_layers = 1,
                 output_dim = 2,
                 device = self.device,
@@ -565,122 +565,133 @@ class RealRobotBetaNetwork(nn.Module):
             # Learning rate schedulers
             self.lr = lr
             self.opt = torch.optim.Adam(
-                params=self.model.parameters(), # list(self.model.parameters()) + list(self.obs_encoder.parameters()),
+                params=self.model.parameters(),
                 lr=self.lr, 
                 weight_decay=1e-5
             )
+            
             warm_up_scheduler = LinearLR(self.opt, start_factor=1e-8, end_factor=1.0, total_iters=warm_up_steps)
             cosine_scheduler = CosineAnnealingLR(self.opt, T_max=main_steps)
             self.scheduler = SequentialLR(self.opt, schedulers=[warm_up_scheduler, cosine_scheduler], milestones=[warm_up_steps])
-
 
             sequence_length = dataset["action"].shape[1]
             camera_keys = dataset["obs"]["images"].keys()
             qpos_keys = [key for key in dataset["obs"].keys() if key != 'images']
 
             for epoch in range(num_epochs):
-
                 beta_loss_1 = []
                 beta_loss_2 = []
                 beta_loss_all = []
 
                 batch_shuffled_idx = np.random.permutation(dataset["action"].shape[0])
-                for i in tqdm(range(interval)):
-
+                current_lr = self.opt.param_groups[0]['lr']
+                
+                for i in tqdm(range(interval), desc=f'Training Beta Model: epoch: {epoch+1}, lr: {current_lr:.2e}'):
                     start_pt = i * batch_size
                     end_pt = min((i + 1) * batch_size, dataset["action"].shape[0])
                     indices = batch_shuffled_idx[start_pt:end_pt]
-                    batch = {}
-                    batch["action"] = dataset["action"][indices]
-                    batch["action_2"] = dataset["action_2"][indices]
-                    batch["votes"] = dataset["votes"][indices]
-                    batch["votes_2"] = dataset["votes_2"][indices]
-                    batch['obs'] = {}
-                    batch['obs_2'] = {}
+                    
                     compress_len = dataset["compress_len"][indices]
                     compress_len_2 = dataset["compress_len_2"][indices]
-
+                    
+                    act_1 = torch.from_numpy(dataset["action"][indices]).float()
+                    act_2 = torch.from_numpy(dataset["action_2"][indices]).float()
+                    votes_1 = torch.from_numpy(dataset["votes"][indices]).float()
+                    votes_2 = torch.from_numpy(dataset["votes_2"][indices]).float()
+                    
+                    batch_obs_1 = {}
+                    batch_obs_2 = {}
+                    
                     for key in qpos_keys:
-                        batch['obs'][key] = dataset["obs"][key][indices]
-                        batch['obs_2'][key] = dataset["obs_2"][key][indices]
+                        batch_obs_1[key] = torch.from_numpy(dataset["obs"][key][indices]).float()
+                        batch_obs_2[key] = torch.from_numpy(dataset["obs_2"][key][indices]).float()
 
                     for key in camera_keys:
                         image_data_1 = dataset["obs"]["images"][key][indices]
-                        image_data_2 = dataset["obs_2"]["images"][key][indices]
-                        batch_decompressed_images = []
-                        batch_decompressed_images_2 = []
+                        batch_decompressed_images_1 = []
+                        
                         for k in range(len(image_data_1)):
                             img_data = image_data_1[k, :, :int(compress_len[k, 0])].copy()
-                            img_data_2 = image_data_2[k, :, :int(compress_len_2[k, 0])].copy()
                             with concurrent.futures.ThreadPoolExecutor() as executor:
                                 results = executor.map(decode_image, img_data)
-                                results_2 = executor.map(decode_image, img_data_2)
                                 decompressed_images = list(results)
+                            batch_decompressed_images_1.append(decompressed_images)
+                        
+                        batch_decompressed_images_1 = np.array(batch_decompressed_images_1)
+                        batch_decompressed_images_1 = np.einsum('b k h w c -> b k c h w', batch_decompressed_images_1)
+                        batch_obs_1[key] = torch.from_numpy(batch_decompressed_images_1 / 255.0).float()
+                        
+                        del batch_decompressed_images_1, image_data_1
+                        
+                        image_data_2 = dataset["obs_2"]["images"][key][indices]
+                        batch_decompressed_images_2 = []
+                        
+                        for k in range(len(image_data_2)):
+                            img_data_2 = image_data_2[k, :, :int(compress_len_2[k, 0])].copy()
+                            with concurrent.futures.ThreadPoolExecutor() as executor:
+                                results_2 = executor.map(decode_image, img_data_2)
                                 decompressed_images_2 = list(results_2)
-                            batch_decompressed_images.append(decompressed_images)
                             batch_decompressed_images_2.append(decompressed_images_2)
                         
-                        batch_decompressed_images = np.array(batch_decompressed_images)
-                        batch_decompressed_images = np.einsum('b k h w c -> b k c h w', batch_decompressed_images)
-                        batch_decompressed_images = batch_decompressed_images / 255.0
-
                         batch_decompressed_images_2 = np.array(batch_decompressed_images_2)
                         batch_decompressed_images_2 = np.einsum('b k h w c -> b k c h w', batch_decompressed_images_2)
-                        batch_decompressed_images_2 = batch_decompressed_images_2 / 255.0
+                        batch_obs_2[key] = torch.from_numpy(batch_decompressed_images_2 / 255.0).float()
+                        
+                        del batch_decompressed_images_2, image_data_2
 
-                        batch['obs'][key] = batch_decompressed_images
-                        batch['obs_2'][key] = batch_decompressed_images_2
-                        del batch_decompressed_images, batch_decompressed_images_2, image_data_1, image_data_2
-
-                    # batch = dict_apply(batch, torch.from_numpy)
-
-                    # get batch
-                    obs_1 = self.normalizer.normalize(batch['obs'])
+                    obs_1 = self.normalizer.normalize(batch_obs_1)
                     for key in obs_1.keys():
-                        obs_1[key] = obs_1[key].float()
-                    act_1 = self.normalizer['action'].normalize(batch['action']).float()
-                    obs_2 = self.normalizer.normalize(batch['obs_2'])
-                    for key in obs_2.keys():
-                        obs_2[key] = obs_2[key].float()
-                    act_2 = self.normalizer['action'].normalize(batch['action_2']).float()
-
-                    this_nobs = dict_apply(obs_1, lambda x: x.reshape(-1, *x.shape[2:]))
-                    nobs_features = self.obs_encoder(this_nobs)
-                    global_cond = nobs_features.reshape(batch_size, sequence_length, -1)
-                    this_nobs_2 = dict_apply(obs_2, lambda x: x.reshape(-1, *x.shape[2:]))
-                    nobs_features_2 = self.obs_encoder(this_nobs_2)
-                    global_cond_2 = nobs_features_2.reshape(batch_size, sequence_length, -1)
-
+                        obs_1[key] = obs_1[key].to(self.device)
                     
-                    s_a_1 = torch.cat([global_cond, act_1], dim=-1).to(self.device)
-                    s_a_2 = torch.cat([global_cond_2, act_2], dim=-1).to(self.device)
-
+                    act_1 = self.normalizer['action'].normalize(act_1).to(self.device)
+                    
+                    with torch.no_grad():
+                        this_nobs_1 = dict_apply(obs_1, lambda x: x.reshape(-1, *x.shape[2:]))
+                        nobs_features_1 = self.obs_encoder(this_nobs_1)
+                        global_cond_1 = nobs_features_1.reshape(batch_size, sequence_length, -1)
+                        
+                        s_a_1 = torch.cat([global_cond_1, act_1], dim=-1)
+                        del this_nobs_1, nobs_features_1, global_cond_1
+                    
+                    del obs_1
+                    
+                    obs_2 = self.normalizer.normalize(batch_obs_2)
+                    for key in obs_2.keys():
+                        obs_2[key] = obs_2[key].to(self.device)
+                    
+                    act_2 = self.normalizer['action'].normalize(act_2).to(self.device)
+                    
+                    with torch.no_grad():
+                        this_nobs_2 = dict_apply(obs_2, lambda x: x.reshape(-1, *x.shape[2:]))
+                        nobs_features_2 = self.obs_encoder(this_nobs_2)
+                        global_cond_2 = nobs_features_2.reshape(batch_size, sequence_length, -1)
+                        
+                        s_a_2 = torch.cat([global_cond_2, act_2], dim=-1)
+                        del this_nobs_2, nobs_features_2, global_cond_2
+                    
+                    del obs_2
                     conditions_1 = [
-                        np.all(batch['votes'] == 1, axis=1),
-                        np.all(batch['votes'] == 0, axis=1),
-                        np.all(batch['votes'] == 0.5, axis=1)
-                        ]
+                        votes_1.numpy() == 1,
+                        votes_1.numpy() == 0,
+                        votes_1.numpy() == 0.5
+                    ]
                     values = [1, 0, 0]
                     single_labels_1 = torch.from_numpy(np.select(conditions_1, values)).float().to(self.device)
 
                     conditions_2 = [
-                        np.all(batch['votes_2'] == 1, axis=1),
-                        np.all(batch['votes_2'] == 0, axis=1),
-                        np.all(batch['votes_2'] == 0.5, axis=1)
-                        ]
-                    values = [1, 0, 0]
+                        votes_2.numpy() == 1,
+                        votes_2.numpy() == 0,
+                        votes_2.numpy() == 0.5
+                    ]
                     single_labels_2 = torch.from_numpy(np.select(conditions_2, values)).float().to(self.device)
 
                     pred_1_alpha_beta = self.model(s_a_1) # batch_size * 2
                     pred_1_alpha = pred_1_alpha_beta[:, 0]
                     pred_1_beta = pred_1_alpha_beta[:, 1]
 
-
                     pred_2_alpha_beta = self.model(s_a_2)
                     pred_2_alpha = pred_2_alpha_beta[:, 0]
                     pred_2_beta = pred_2_alpha_beta[:, 1]
-                    # if equal, then discard
-                    # TODO maybe if equal, then both towards 1 (both preferred)
 
                     loss_1 = torch.mean((torch.log(pred_1_alpha) + torch.log(pred_2_beta))* single_labels_1 \
                             + (torch.log(pred_2_alpha) + torch.log(pred_1_beta)) * single_labels_2)
@@ -690,17 +701,15 @@ class RealRobotBetaNetwork(nn.Module):
 
                     beta_loss = -loss_1 + self.beta_coef*loss_2
 
-                    beta_loss_1.append(loss_1)
-                    beta_loss_2.append(loss_2)
-                    beta_loss_all.append(beta_loss)
+                    beta_loss_1.append(loss_1.detach())
+                    beta_loss_2.append(loss_2.detach())
+                    beta_loss_all.append(beta_loss.detach())
 
                     self.opt.zero_grad()
                     beta_loss.backward()
                     self.opt.step()
+                    self.scheduler.step()
 
-                # Scheduler step
-                avg_loss = torch.stack(beta_loss_all).mean().item()
-                self.scheduler.step(avg_loss)
 
                 beta_loss_1 = torch.stack(beta_loss_1, dim=0)
                 beta_loss_2 = torch.stack(beta_loss_2, dim=0)
@@ -709,8 +718,9 @@ class RealRobotBetaNetwork(nn.Module):
                 print("mean_beta_loss_data:", torch.mean(beta_loss_1).item())
                 print("mean_beta_loss_kl:", torch.mean(beta_loss_2).item())
                 print("mean_beta_loss_all:", torch.mean(beta_loss_all).item())
+                print("current_learning_rate:", self.opt.param_groups[0]['lr'])
 
-                if save_dir is not None and (epoch+1) % 200 == 0:
+                if save_dir is not None and (epoch+1) % 10 == 0:
                     tmp_save_dir= Path(save_dir) / f'itr_{epoch+1}'
                     tmp_save_dir.mkdir(parents=True, exist_ok=True)
                     model_file = tmp_save_dir / 'beta_model.pth'

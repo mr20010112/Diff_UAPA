@@ -26,7 +26,7 @@ shape_meta: &shape_meta
 
 origin_dataset:
   _target_: diffusion_policy.dataset.realrobot_dataset.Hdf5RealRobotDataset
-  dataset_dir: data/realrobot/test #change
+  dataset_dir: data/realrobot/expert
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
   pad_after: ${eval:'${n_action_steps}-1'}
@@ -35,7 +35,7 @@ origin_dataset:
 
 dataset_1:
   _target_: diffusion_policy.dataset.realrobot_normal_dataset.Hdf5RealRobotDataset
-  dataset_dir: data/realrobot/test #change
+  dataset_dir: data/realrobot/expert
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
   pad_after: ${eval:'${n_action_steps}-1'}
@@ -44,7 +44,7 @@ dataset_1:
 
 dataset_2:
   _target_: diffusion_policy.dataset.realrobot_normal_dataset.Hdf5RealRobotDataset
-  dataset_dir: data/realrobot/test #change
+  dataset_dir: data/realrobot/normal
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
   pad_after: ${eval:'${n_action_steps}-1'}

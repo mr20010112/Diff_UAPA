@@ -128,7 +128,7 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
             pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = votes_2.reshape(-1, 1)
 
             pref_dataset.set_beta_priori(obs_encoder = copy.deepcopy(ref_policy.obs_encoder), normalizer=normalizer)
-            pref_dataset.beta_model.fit_data(dataset=pref_dataset.construct_pref_data(), num_epochs=50, warm_up_epochs=5, batch_size=1, lr=2.0e-5)
+            pref_dataset.beta_model.fit_data(dataset=pref_dataset.construct_pref_data(), num_epochs=50, warm_up_epochs=5, batch_size=2, lr=2.0e-5, save_dir='data/beta_model')
             with torch.no_grad():
                 pref_dataset.update_beta_priori(batch_size=1)
 
@@ -257,7 +257,7 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
                             if cfg.training.map.use_map:
                                 avg_traj_loss = compute_all_traj_image_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
                                                                       model = self.model, ref_model = ref_policy.model, stride=cfg.stride)
-                            raw_loss = self.model.compute_loss(batch, stride=cfg.stride, ref_model=ref_policy)
+                            raw_loss = self.model.compute_loss(batch, stride=cfg.stride, ref_model=ref_policy, avg_traj_loss=avg_traj_loss)
                             loss = raw_loss / cfg.training.gradient_accumulate_every
                             loss.backward()
 

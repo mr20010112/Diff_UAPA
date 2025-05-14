@@ -228,7 +228,7 @@ class TrainDiffusionRealRobotWorkspace(BaseWorkspace):
                         obs_dict = batch['obs']
                         for key in obs_dict.keys():
                             obs_dict[key] = obs_dict[key][:, :self.model.n_obs_steps, ...]
-                        gt_action = batch['action'][:, self.model.n_obs_steps:self.model.n_obs_steps+self.model.n_action_steps, ...]
+                        gt_action = batch['action'][:, self.model.n_obs_steps-1:self.model.n_obs_steps+self.model.n_action_steps-1, ...]
                         
                         result = policy.predict_action(obs_dict)
                         pred_action = result['action']
