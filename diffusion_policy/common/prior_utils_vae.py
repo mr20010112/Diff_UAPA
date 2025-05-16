@@ -587,7 +587,7 @@ class RealRobotBetaNetwork(nn.Module):
                 batch_shuffled_idx = np.random.permutation(dataset["action"].shape[0])
                 current_lr = self.opt.param_groups[0]['lr']
                 
-                for i in tqdm(range(interval), desc=f'Training Beta Model: epoch: {epoch+1}, lr: {current_lr:.2e}'):
+                for i in tqdm(range(interval), desc=f'Training Beta Model: epoch: {epoch+1}'):
                     start_pt = i * batch_size
                     end_pt = min((i + 1) * batch_size, dataset["action"].shape[0])
                     indices = batch_shuffled_idx[start_pt:end_pt]

@@ -76,16 +76,6 @@ class DatacollectDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             self.global_step = 0
             self.epoch = 0
 
-        self.model.set_normalizer(normalizer)
-        if cfg.training.use_ema:
-            self.ema_model.set_normalizer(normalizer)
-
-        # configure ema
-        ema: EMAModel = None
-        if cfg.training.use_ema:
-            ema = hydra.utils.instantiate(
-                cfg.ema,
-                model=self.ema_model)
 
         # configure env runner
         env_runner: BaseLowdimRunner
@@ -141,7 +131,7 @@ class DatacollectDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 self.global_step += 1
                 self.epoch += 1
 
-        with h5py.File('robomimic_data_0.5.h5', 'w') as f:
+        with h5py.File(f'{cfg.task.name}_data_0.5.h5', 'w') as f:
             # 将字典的每个项存储为数据集
             for key, value in all_episodes.items():
                 f.create_dataset(key, data=value)

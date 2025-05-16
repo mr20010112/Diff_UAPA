@@ -299,8 +299,6 @@ class RLHF_RealRobotDataset(BaseImageDataset):
                 
                 batch_act_1 = torch.from_numpy(action_1[indices]).float()
                 batch_act_2 = torch.from_numpy(action_2[indices]).float()
-                batch_votes_1 = torch.from_numpy(votes_1[indices]).float()
-                batch_votes_2 = torch.from_numpy(votes_2[indices]).float()
                 
                 batch_obs_1 = {}
                 batch_obs_2 = {}

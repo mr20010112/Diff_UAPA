@@ -3,7 +3,7 @@ defaults:
   - task: datacollect_can_lowdim
 
 name: train_bet_lowdim
-_target_: diffusion_policy.workspace.pbrl_bet_lowdim_online_workspace.PbrlBETLowdimWorkspace
+_target_: diffusion_policy.workspace.datacollect_bet_lowdim_workspace.DatacollectBETLowdimWorkspace
 checkpoint_dir: 'data/experiments/low_dim/robomimic/can/bet/base/epoch=0004-test_mean_score=0.560.ckpt'
 
 obs_dim: ${task.obs_dim}
@@ -12,6 +12,7 @@ keypoint_dim: ${task.keypoint_dim}
 task_name: ${task.name}
 exp_name: "default"
 
+gamma: 0.999
 horizon: 10
 n_obs_steps: 2
 n_action_steps: 8
@@ -77,6 +78,11 @@ training:
   max_train_steps: null
   # misc
   tqdm_interval_sec: 1.0
+
+optimizer:
+  learning_rate: 2.0e-5 # 1e-4
+  weight_decay: 0.01
+  betas: [0.9, 0.99]
 
 logging:
   project: diffusion_policy_debug

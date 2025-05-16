@@ -1,5 +1,6 @@
 from typing import Dict
 import copy
+import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -301,6 +302,8 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
         votes_2 = batch["votes_2"].to(self.device)
         beta_priori_2 = batch["beta_priori_2"].to(self.device).detach()
         save_avg_traj_loss = torch.tensor(avg_traj_loss, device=self.device).detach()
+        start_1 = random.randint(0, max(self.n_obs_steps, stride - self.n_obs_steps))
+        start_2 = random.randint(0, max(self.n_obs_steps, stride - self.n_obs_steps))
 
         avg_traj_loss = save_avg_traj_loss
 
@@ -327,10 +330,10 @@ class DiffusionRealRobotPolicy(BaseImagePolicy):
         # action_2 = self.normalizer['action'].normalize(action_2)
 
         for key in obs_keys:
-            obs_1[key] = slice_episode(obs_1[key], horizon=self.horizon, stride=stride)
-            obs_2[key] = slice_episode(obs_2[key], horizon=self.horizon, stride=stride)
-        action_1 = slice_episode(action_1, horizon=self.horizon, stride=stride)
-        action_2 = slice_episode(action_2, horizon=self.horizon, stride=stride)
+            obs_1[key] = slice_episode(obs_1[key], horizon=self.horizon, stride=stride, start=start_1)
+            obs_2[key] = slice_episode(obs_2[key], horizon=self.horizon, stride=stride, start=start_2)
+        action_1 = slice_episode(action_1, horizon=self.horizon, stride=stride, start=start_1)
+        action_2 = slice_episode(action_2, horizon=self.horizon, stride=stride, start=start_2)
 
         for i in range(len(action_1)):
             action_slide = action_1[i]

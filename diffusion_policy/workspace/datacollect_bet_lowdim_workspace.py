@@ -64,10 +64,10 @@ class DatacollectBETLowdimWorkspace(BaseWorkspace):
 
         # resume training
         if cfg.training.resume:
-            lastest_ckpt_path = self.get_checkpoint_path()
-            if lastest_ckpt_path.is_file():
-                print(f"Resuming from checkpoint {lastest_ckpt_path}")
-                self.load_checkpoint(path=lastest_ckpt_path)
+            ckpt_path = pathlib.Path(cfg.checkpoint_dir)
+            if ckpt_path.is_file():
+                print(f"Resuming from checkpoint {ckpt_path}")
+                self.load_checkpoint(path=ckpt_path, exclude_keys='optimizer')
             self.optimizer = self.policy.get_optimizer(**cfg.optimizer)
             self.global_step = 0
             self.epoch = 0
@@ -108,60 +108,6 @@ class DatacollectBETLowdimWorkspace(BaseWorkspace):
         with JsonLogger(log_path) as json_logger:
             for local_epoch_idx in range(cfg.training.num_epochs):
                 step_log = dict()
-                # ========= train for this epoch ==========
-                train_losses = list()
-                with tqdm.tqdm(train_dataloader, desc=f"Training epoch {self.epoch}", 
-                        leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
-                    for batch_idx, batch in enumerate(tepoch):
-                        # device transfer
-                        batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
-                        if train_sampling_batch is None:
-                            train_sampling_batch = batch
-
-                        # compute loss
-                        raw_loss, loss_components = self.policy.compute_loss(batch)
-                        loss = raw_loss / cfg.training.gradient_accumulate_every
-                        loss.backward()
-
-                        # clip grad norm
-                        torch.nn.utils.clip_grad_norm_(
-                            self.policy.state_prior.parameters(), cfg.training.grad_norm_clip
-                        )
-
-                        # step optimizer
-                        if self.global_step % cfg.training.gradient_accumulate_every == 0:
-                            self.optimizer.step()
-                            self.optimizer.zero_grad(set_to_none=True)
-
-                        # logging
-                        raw_loss_cpu = raw_loss.item()
-                        tepoch.set_postfix(loss=raw_loss_cpu, refresh=False)
-                        train_losses.append(raw_loss_cpu)
-                        step_log = {
-                            'train_loss': raw_loss_cpu,
-                            'global_step': self.global_step,
-                            'epoch': self.epoch,
-                            'train_loss_offset': loss_components['offset'].item(),
-                            'train_loss_class': loss_components['class'].item(),
-                            'lr': lr_scheduler.get_last_lr()[0]
-                        }
-
-                        is_last_batch = (batch_idx == (len(train_dataloader)-1))
-                        if not is_last_batch:
-                            # log of last step is combined with validation and rollout
-                            wandb_run.log(step_log, step=self.global_step)
-                            json_logger.log(step_log)
-                            self.global_step += 1
-
-                        if (cfg.training.max_train_steps is not None) \
-                            and batch_idx >= (cfg.training.max_train_steps-1):
-                            break
-
-                # at the end of each epoch
-                # replace train_loss with epoch average
-                train_loss = np.mean(train_losses)
-                step_log['train_loss'] = train_loss
-
                 # ========= eval for this epoch ==========
                 self.policy.eval()
 

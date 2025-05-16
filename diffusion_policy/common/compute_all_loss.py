@@ -1,10 +1,29 @@
 import torch
 import numpy as np
 import torch.nn.functional as F
+import random
 from einops import rearrange, reduce
+import cv2
+import concurrent.futures
 from diffusion_policy.policy.base_image_policy import BaseImagePolicy
 from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
 from diffusion_policy.model.common.slice import slice_episode
+
+def unflatten_dataset_dict(flat_dict, delimiter='/'):
+    result = {}
+    for compound_key, value in flat_dict.items():
+        keys = compound_key.split(delimiter)
+        current = result
+        for key in keys[:-1]:
+            if key not in current:
+                current[key] = {}
+            current = current[key]
+        current[keys[-1]] = value
+    
+    return result
+
+def decode_image(data):
+    return cv2.imdecode(data, 1)
 
 def compute_all_traj_loss(replay_buffer=None, model:BaseImagePolicy=None, ref_model:BaseImagePolicy=None, stride=1):
     if replay_buffer is None:
@@ -113,143 +132,205 @@ def compute_all_traj_loss(replay_buffer=None, model:BaseImagePolicy=None, ref_mo
         return torch.mean(loss)
     
 
+
 def compute_all_traj_loss_realrobot(replay_buffer=None, model=None, ref_model=None, stride=1):
     if replay_buffer is None:
         return np.zeros([1])
     else:
         data = replay_buffer.data
-        meta_data = replay_buffer.meta
-        observations_1 = {key:data[key].to(model.device) for key in observations_1.keys()}
+        data = unflatten_dataset_dict(flat_dict=data)
+        observations_1 = data['obs']
         actions_1 = np.array(data['action'], dtype=np.float32)
-        observations_2 = {key:data[key].to(model.device) for key in observations_2.keys()}
+        observations_2 = data['obs_2']
         actions_2 = np.array(data['action_2'], dtype=np.float32)
-        length_1 = torch.tensor(meta_data['length'], device=model.device)
-        length_2 = torch.tensor(meta_data['length_2'], device=model.device)
+        compress_len_1 = data['compress_len']
+        compress_len_2 = data['compress_len_2']
+        camera_keys = observations_1['images'].keys()
+        qpos_keys = [key for key in observations_1.keys() if key != 'images']
 
+        # 保持原有图像处理逻辑，但进行性能优化
+        for key in camera_keys:
+            img_data_1 = observations_1['images'][key]
+            img_data_2 = observations_2['images'][key]
+            decompressed_images_1 = []
+            decompressed_images_2 = []
+
+            # 处理第一组图像
+            for k in range(img_data_1.shape[0]):
+                image = img_data_1[k, :, :int(compress_len_1[k, 0])].copy()
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    results = executor.map(decode_image, image)
+                    decompressed_images = list(results)
+                decompressed_images_1.append(decompressed_images)
+
+            decompressed_images_1 = np.array(decompressed_images_1)
+            decompressed_images_1 = np.einsum('b k h w c -> b k c h w', decompressed_images_1)
+            observations_1[key] = torch.from_numpy(decompressed_images_1 / 255.0).float()
+
+            # 处理第二组图像
+            for k in range(img_data_2.shape[0]):
+                image = img_data_2[k, :, :int(compress_len_2[k, 0])].copy()
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    results = executor.map(decode_image, image)
+                    decompressed_images = list(results)
+                decompressed_images_2.append(decompressed_images)
+
+            decompressed_images_2 = np.array(decompressed_images_2)
+            decompressed_images_2 = np.einsum('b k h w c -> b k c h w', decompressed_images_2)
+            observations_2[key] = torch.from_numpy(decompressed_images_2 / 255.0).float()
+
+            del img_data_1, img_data_2, decompressed_images_1, decompressed_images_2
+            torch.cuda.empty_cache()
+
+        # 批量转换所有非图像数据
+        for key in qpos_keys:
+            observations_1[key] = torch.from_numpy(observations_1[key]).float()
+            observations_2[key] = torch.from_numpy(observations_2[key]).float()
+
+        del data
+        torch.cuda.empty_cache()
+
+        # 禁用梯度
         for param in ref_model.parameters():
             param.requires_grad = False
 
         ref_model = ref_model.to(model.device)
 
-        # Normalize data
+        # 规范化数据
         obs_1 = model.normalizer.normalize(observations_1)
         action_1 = model.normalizer['action'].normalize(actions_1)
         obs_2 = model.normalizer.normalize(observations_2)
         action_2 = model.normalizer['action'].normalize(actions_2)
+
+        start_1 = random.randint(0, model.n_obs_steps)
+        start_2 = random.randint(0, model.n_obs_steps)
         
-        # Slice trajectories
-        obs_1 = {key:slice_episode(obs_1[key], horizon=model.horizon, stride=stride) for key in obs_1.keys()}
-        action_1 = slice_episode(action_1, horizon=model.horizon, stride=stride)
-        obs_2 = {key:slice_episode(obs_2[key], horizon=model.horizon, stride=stride) for key in obs_2.keys()}
-        action_2 = slice_episode(action_2, horizon=model.horizon, stride=stride)  
+        # 切片轨迹
+        obs_1 = {key: slice_episode(obs_1[key], horizon=model.horizon, stride=stride, start=start_1) for key in obs_1.keys()}
+        action_1 = slice_episode(action_1, horizon=model.horizon, stride=stride, start=start_1)
+        obs_2 = {key: slice_episode(obs_2[key], horizon=model.horizon, stride=stride, start=start_2) for key in obs_2.keys()}
+        action_2 = slice_episode(action_2, horizon=model.horizon, stride=stride, start=start_2)
 
-
-        bsz = obs_1[0].shape[0]
+        bsz = action_1.shape[0]
         timesteps_1 = torch.randint(0, model.noise_scheduler.config.num_train_timesteps, (bsz,), device=model.device).long()
         timesteps_2 = torch.randint(0, model.noise_scheduler.config.num_train_timesteps, (bsz,), device=model.device).long()
 
-        # Pre-allocate loss
-        traj_loss_1, traj_loss_2 = 0, 0
+        # 计算轨迹损失的优化函数
+        def compute_traj_image_loss(obs_slices, action_slices, timesteps, model, ref_model):
+            with torch.no_grad():  # 确保所有操作都在无梯度模式下执行
+                total_loss = torch.zeros(action_slices.shape[0], device=model.device)
+                To = model.n_obs_steps
+                batch_size = action_slices.shape[0]
+                horizon = model.horizon
+                cond = None
 
-        # Helper function to compute loss for a single trajectory
-        def compute_traj_image_loss(obs_slices, action_slices, timestep, model, ref_model, length, stride):
-            total_loss = 0
-            To = model.n_obs_steps
-            batch_size = action_slices.shape[1]
-            cond=None
-            
-            for idx, action_slide in enumerate(action_slices):
-                obs_slide = {key:obs_slices[key][idx] for key in obs_slices.keys()}
-                gamma_factors = model.gamma ** (idx * model.horizon + np.arange(model.horizon))
+                for idx in range(len(action_slices)):
+                    action_slide = action_slices[idx]
+                    obs_slide = {key: obs_slices[key][idx] for key in obs_slices.keys()}
+                    
+                    local_cond = None
+                    global_cond = None
+                    global_cond_ref = None
 
-                nobs = model.mormalizer(obs_slide)
-                nactions = model.mormalizer['action'].normalize(action_slide)
+                    if model.obs_as_global_cond:
+                        # 处理全局条件
+                        this_nobs = dict_apply(obs_slide, 
+                            lambda x: x[:,:To,...].reshape(-1, *x.shape[2:]))
+                        nobs_features = model.obs_encoder(this_nobs)
+                        nobs_features_ref = ref_model.obs_encoder(this_nobs)
+                        
+                        # 重塑回 B, Do
+                        global_cond = nobs_features.reshape(batch_size, -1)
+                        global_cond_ref = nobs_features_ref.reshape(batch_size, -1)
+                        trajectory = action_slide
+                    else:
+                        # 处理局部条件
+                        this_nobs = dict_apply(obs_slide, 
+                            lambda x: x.reshape(-1, *x.shape[2:]))
+                        nobs_features = model.obs_encoder(this_nobs)
+                        nobs_features_ref = ref_model.obs_encoder(this_nobs)
+                        
+                        # 重塑回 B, T, Do
+                        nobs_features = nobs_features.reshape(batch_size, horizon, -1)
+                        nobs_features_ref = nobs_features_ref.reshape(batch_size, horizon, -1)
+                        
+                        # 连接动作和观察特征
+                        trajectory = torch.cat([action_slide, nobs_features], dim=-1)
+                        trajectory_ref = torch.cat([action_slide, nobs_features_ref], dim=-1)
 
-                local_cond = None
-                global_cond = None
-                global_cond_ref = None
-                if model.obs_as_global_cond:
-                    # reshape B, T, ... to B*T
-                    this_nobs = dict_apply(nobs, 
-                        lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
-                    nobs_features = model.obs_encoder(this_nobs)
-                    nobs_features_ref = ref_policy.obs_encoder(this_nobs)
-                    # reshape back to B, Do
-                    global_cond = nobs_features.reshape(batch_size, -1)
-                    global_cond_ref = nobs_features_ref.reshape(batch_size, -1)
-                    trajectory = nactions
-                    cond_data = trajectory
-                    cond_data_ref = trajectory
-                else:
-                    # reshape B, T, ... to B*T
-                    this_nobs = dict_apply(nobs, lambda x: x.reshape(-1, *x.shape[2:]))
-                    nobs_features = model.obs_encoder(this_nobs)
-                    nobs_features_ref = ref_model.obs_encoder(this_nobs)
-                    # reshape back to B, T, Do
-                    nobs_features = nobs_features.reshape(batch_size, horizon, -1)
-                    nobs_features_ref = nobs_features_ref.reshape(batch_size, horizon, -1)
-                    cond_data = torch.cat([nactions, nobs_features], dim=-1)
-                    cond_data_ref = torch.cat([nactions, nobs_features_ref], dim=-1)
-                    trajectory = cond_data.detach()
+                    # 生成条件掩码
+                    condition_mask = model.mask_generator(trajectory.shape).to(model.device)
+                    loss_mask = (~condition_mask).float()
 
+                    # 生成噪声
+                    noise = torch.randn(trajectory.shape, device=model.device)
 
-                condition_mask = model.mask_generator(trajectory.shape)
-
-                # Sample noise that we'll add to the images
-                noise = torch.randn(trajectory.shape, device=trajectory.device)
-
-                timesteps = torch.randint(
-                    0, model.noise_scheduler.config.num_train_timesteps, 
-                    (batch_size,), device=trajectory.device
-                ).long()
-            
-
-                # Add noise to the clean images according to the noise magnitude at each timestep
-                # (this is the forward diffusion process)
-                noisy_trajectory = self.noise_scheduler.add_noise(trajectory, noise, timesteps)
-                noisy_trajectory_ref = noisy_trajectory.clone()
-                
-                loss_mask = (~condition_mask).float()
-
-
-                noise = torch.randn(trajectory.shape, device=model.device)
-
-                # Disable gradient computation
-                with torch.no_grad():
-                    noisy_trajectory = model.noise_scheduler.add_noise(trajectory, noise, timestep)
-                    noisy_trajectory_ref = noisy_trajectory.clone()
+                    # 添加噪声
+                    noisy_trajectory = model.noise_scheduler.add_noise(trajectory, noise, timesteps)
                     noisy_trajectory[condition_mask] = trajectory[condition_mask]
-                    noisy_trajectory_ref[condition_mask] = cond_data_ref[condition_mask]
+                    
+                    if not model.obs_as_global_cond:
+                        noisy_trajectory_ref = model.noise_scheduler.add_noise(trajectory_ref, noise, timesteps)
+                        noisy_trajectory_ref[condition_mask] = trajectory_ref[condition_mask]
+                    else:
+                        noisy_trajectory_ref = noisy_trajectory.clone()
 
-                    ref_pred = ref_model.model(noisy_trajectory_ref, timesteps, 
-                        local_cond=local_cond, global_cond=global_cond_ref)
+                    # 模型预测
                     pred = model.model(noisy_trajectory, timesteps, 
-                        local_cond=local_cond, global_cond=global_cond)
+                                      local_cond=local_cond, global_cond=global_cond)
+                    pred_ref = ref_model.model(noisy_trajectory_ref if not model.obs_as_global_cond else noisy_trajectory, 
+                                             timesteps, local_cond=local_cond, global_cond=global_cond_ref)
 
-                    mask = (model.horizon + (idx - 1)*stride) <= length
-                    mask = mask.int()
-                    mask = torch.squeeze(mask, dim=-1)
+                    # 确定目标类型
+                    pred_type = model.noise_scheduler.config.prediction_type
+                    if pred_type == 'epsilon':
+                        target = noise
+                    elif pred_type == 'sample':
+                        target = trajectory
+                    else:
+                        raise ValueError(f"Unsupported prediction type {pred_type}")
 
-                    slice_loss = torch.norm((pred - noise) * loss_mask.type(pred.dtype), dim=-1) ** 2\
-                                - torch.norm((ref_pred - noise) * loss_mask.type(ref_pred.dtype), dim=-1) ** 2
-                    slice_loss = torch.sum(slice_loss * torch.tensor(gamma_factors, device=model.device, dtype=torch.float32), dim=-1)
-                    total_loss += slice_loss * mask
+                    # 计算损失
+                    loss = F.mse_loss(pred, target, reduction='none')
+                    loss_ref = F.mse_loss(pred_ref, target, reduction='none')
+                    
+                    # 应用掩码并减少维度
+                    loss = loss * loss_mask
+                    loss_ref = loss_ref * loss_mask
+                    loss = reduce(loss, 'b t ... -> b t (...)', 'mean')
+                    loss_ref = reduce(loss_ref, 'b t ... -> b t (...)', 'mean')
+                    
+                    # 计算本轮损失并更新总损失
+                    slice_loss = torch.sum(loss_ref - loss, dim=1)
+                    total_loss += slice_loss
+                    
+                    # 显式释放内存
+                    del trajectory, noise, noisy_trajectory, pred, pred_ref
+                    if not model.obs_as_global_cond:
+                        del trajectory_ref, noisy_trajectory_ref
+                    del nobs_features, nobs_features_ref, this_nobs
+                    torch.cuda.empty_cache()
 
-                # Explicitly delete unused variables to release GPU memory
-                del trajectory, noise, noisy_trajectory, ref_pred, pred, loss_mask, condition_mask
-                torch.cuda.empty_cache()
+                return total_loss
 
-            return total_loss.detach()
+        # 计算两个轨迹的损失
+        with torch.no_grad():
+            # 计算轨迹1的损失
+            traj_loss_1 = compute_traj_image_loss(obs_1, action_1, timesteps_1, model, ref_model)
+            
+            # 计算轨迹2的损失
+            traj_loss_2 = compute_traj_image_loss(obs_2, action_2, timesteps_2, model, ref_model)
 
-        # Compute loss for trajectory 1
-        traj_loss_1 = compute_traj_image_loss(obs_1, action_1, timesteps_1, model, ref_model, length_1, stride)
-        # Compute loss for trajectory 2
-        traj_loss_2 = compute_traj_image_loss(obs_2, action_2, timesteps_2, model, ref_model, length_2, stride)
+            # 平均损失
+            loss = (traj_loss_1 + traj_loss_2) / 2
+            final_loss = torch.mean(loss)
 
-        # Average the losses
-        loss = (traj_loss_1 + traj_loss_2) / 2
+        # 显式清理内存
+        del obs_1, obs_2, action_1, action_2, traj_loss_1, traj_loss_2, loss
+        torch.cuda.empty_cache()
 
-        return torch.mean(loss)
+        return final_loss
+
     
 def compute_all_bet_traj_loss(replay_buffer=None, model=None, stride=1):
     if replay_buffer is None:

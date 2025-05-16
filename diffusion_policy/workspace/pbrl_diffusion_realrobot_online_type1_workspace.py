@@ -128,11 +128,10 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
             pref_dataset.pref_replay_buffer.root['meta']['votes_2'] = votes_2.reshape(-1, 1)
 
             pref_dataset.set_beta_priori(obs_encoder = copy.deepcopy(ref_policy.obs_encoder), normalizer=normalizer)
-            # pref_dataset.beta_model.fit_data(dataset=pref_dataset.construct_pref_data(), num_epochs=50, warm_up_epochs=5, batch_size=2, lr=2.0e-5, save_dir='data/beta_model')
-            # pref_dataset.beta_model.fit_data(load_dir = 'data/beta_model/itr_40/beta_model.pth')
-            pref_dataset.beta_model.fit_data(dataset=pref_dataset.construct_pref_data(), num_epochs=20, warm_up_epochs=1, batch_size=2, lr=2.0e-5, save_dir='data/beta_model')
-            with torch.no_grad():
-                pref_dataset.update_beta_priori(batch_size=2)
+            pref_dataset.beta_model.fit_data(load_dir = 'data/beta_model/itr_20/beta_model.pth')
+            # pref_dataset.beta_model.fit_data(dataset=pref_dataset.construct_pref_data(), num_epochs=20, warm_up_epochs=1, batch_size=2, lr=2.0e-5, save_dir='data/beta_model')
+            # with torch.no_grad():
+            #     pref_dataset.update_beta_priori(batch_size=2)
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
 

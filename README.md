@@ -24,7 +24,7 @@ python train.py --config-dir=. --config-name=train_diffusion_transformer_lowdim_
 ```
 This will create a directory in format `data/outputs/yyyy.mm.dd/hh.mm.ss_<method_name>_<task_name>` where configs, logs and checkpoints are written to.
 ## Generate Trajectory Data
-Note that we have generated the trajectory data through the policy trained by behaviour cloning.
+Note that we have generated the trajectory data through the policy trained by behaviour cloning.(Needs a checkpoint)
 
 Alternatively, you can also generate your own dataset with different settings:
 ```
@@ -36,6 +36,7 @@ python train.py --config-dir=diffusion_policy/config --config-name=datacollect_d
 ```
 
 ## Pbrl for Algorithms
+Now we may have a further finetune the diffusion policy with preference-based reinforcement learning techniques.
 
 ```
 # pbrl for diffusion policy in robomimic task
