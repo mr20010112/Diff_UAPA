@@ -76,6 +76,14 @@ class DatacollectDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             self.global_step = 0
             self.epoch = 0
 
+        # configure dataset
+        dataset: BaseLowdimDataset
+        dataset = hydra.utils.instantiate(cfg.task.dataset)
+        normalizer = dataset.get_normalizer()
+
+        self.model.set_normalizer(normalizer)
+        if cfg.training.use_ema:
+            self.ema_model.set_normalizer(normalizer)
 
         # configure env runner
         env_runner: BaseLowdimRunner
@@ -122,7 +130,7 @@ class DatacollectDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 # run rollout
                 # if ((self.epoch % cfg.training.rollout_every) == 0 and self.epoch >= 1200) or (self.epoch == 0):
                 if (self.epoch % cfg.training.rollout_every) == 0:
-                    episode, runner_log = env_runner.run(policy) # runner_log, episode = env_runner.run(policy)
+                    runner_log, episode = env_runner.run(policy)
                     all_episodes['observations'] = np.concatenate([all_episodes['observations'], episode['observations']], axis=0)
                     all_episodes['actions'] = np.concatenate([all_episodes['actions'], episode['actions']], axis=0)
                     all_episodes['rewards'] = np.concatenate([all_episodes['rewards'], episode['rewards']], axis=0)
@@ -132,7 +140,6 @@ class DatacollectDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 self.epoch += 1
 
         with h5py.File(f'{cfg.task.name}_data_0.5.h5', 'w') as f:
-            # 将字典的每个项存储为数据集
             for key, value in all_episodes.items():
                 f.create_dataset(key, data=value)
 

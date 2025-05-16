@@ -23,3 +23,14 @@ env_runner:
   fps: 12.5
   past_action: ${past_action_visible}
   n_envs: null
+
+dataset:
+  _target_: diffusion_policy.dataset.kitchen_mjl_lowdim_dataset.KitchenMjlLowdimDataset
+  dataset_dir: data/kitchen/kitchen_demos_multitask
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  abs_action: ${task.abs_action}
+  robot_noise_ratio: ${task.robot_noise_ratio}
+  seed: 42
+  val_ratio: 0.02

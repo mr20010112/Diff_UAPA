@@ -113,15 +113,16 @@ class DatacollectBETLowdimWorkspace(BaseWorkspace):
 
                 # run rollout
                 if (self.epoch % cfg.training.rollout_every) == 0:
-                    runner_log = env_runner.run(self.policy)
-                    # log all
-                    step_log.update(runner_log)
+                    runner_log, episode = env_runner.run(self.policy)
+                    all_episodes['observations'] = np.concatenate([all_episodes['observations'], episode['observations']], axis=0)
+                    all_episodes['actions'] = np.concatenate([all_episodes['actions'], episode['actions']], axis=0)
+                    all_episodes['rewards'] = np.concatenate([all_episodes['rewards'], episode['rewards']], axis=0)
+                    all_episodes['terminals'] = np.concatenate([all_episodes['terminals'], episode['terminals']], axis=0)
                 
                 self.global_step += 1
                 self.epoch += 1
 
-        with h5py.File('robomimic_data_0.5.h5', 'w') as f:
-            # 将字典的每个项存储为数据集
+        with h5py.File(f'{cfg.task.name}_data_0.5.h5', 'w') as f:
             for key, value in all_episodes.items():
                 f.create_dataset(key, data=value)
 
