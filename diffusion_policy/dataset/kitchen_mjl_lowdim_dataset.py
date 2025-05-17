@@ -11,7 +11,6 @@ from diffusion_policy.model.common.normalizer import LinearNormalizer, SingleFie
 from diffusion_policy.dataset.base_dataset import BaseLowdimDataset
 from diffusion_policy.env.kitchen.kitchen_util import parse_mjl_logs
 
-#处理 "kitchen" 任务的低维数据集。该类从 .mjl 文件中解析数据，存储在 ReplayBuffer 中，并对数据进行采样
 
 class KitchenMjlLowdimDataset(BaseLowdimDataset):
     def __init__(self,
@@ -20,7 +19,7 @@ class KitchenMjlLowdimDataset(BaseLowdimDataset):
             pad_before=0,
             pad_after=0,
             abs_action=True,
-            robot_noise_ratio=0.0, #添加到观测值中的噪声比例，模拟机器人噪声
+            robot_noise_ratio=0.0,
             seed=42,
             val_ratio=0.0
         ):
@@ -29,19 +28,18 @@ class KitchenMjlLowdimDataset(BaseLowdimDataset):
         if not abs_action:
             raise NotImplementedError()
 
-        #包含机器人状态维度上噪声振幅的数组
         robot_pos_noise_amp = np.array([0.1   , 0.1   , 0.1   , 0.1   , 0.1   , 0.1   , 0.1   , 0.1   ,
             0.1   , 0.005 , 0.005 , 0.0005, 0.0005, 0.0005, 0.0005, 0.0005,
             0.0005, 0.005 , 0.005 , 0.005 , 0.1   , 0.1   , 0.1   , 0.005 ,
             0.005 , 0.005 , 0.1   , 0.1   , 0.1   , 0.005 ], dtype=np.float32)
         rng = np.random.default_rng(seed=seed)
 
-        data_directory = pathlib.Path(dataset_dir) #遍历数据集目录中的所有 .mjl 文件，使用 parse_mjl_logs 函数解析每个文件
-        self.replay_buffer = ReplayBuffer.create_empty_numpy() #每个 .mjl 文件的解析结果都会作为一个 episode（包含观测值 obs 和动作 action）加入 ReplayBuffer
+        data_directory = pathlib.Path(dataset_dir)
+        self.replay_buffer = ReplayBuffer.create_empty_numpy()
         for i, mjl_path in enumerate(tqdm(list(data_directory.glob('*/*.mjl')))):
             try:
                 data = parse_mjl_logs(str(mjl_path.absolute()), skipamount=40)
-                qpos = data['qpos'].astype(np.float32) #机器人位置
+                qpos = data['qpos'].astype(np.float32) 
                 obs = np.concatenate([
                     qpos[:,:9],
                     qpos[:,-21:],

@@ -362,16 +362,15 @@ class KitchenLowdimRunner(BaseLowdimRunner):
 
             for i in range(n_envs):
                 episode_reward = np.array(all_rewards[i])
-                indices = np.argwhere(episode_reward == 1.0).flatten()  # 提取一维索引
-                if indices.size == 0:  # 没有找到值为1的索引
+                indices = np.argwhere(episode_reward == 1.0).flatten()
+                if indices.size == 0:
                     rewards[i].extend([0.0] * len(episode_reward))
                 else:
                     prev_index = 0
                     for j, idx in enumerate(indices):
                         rewards[i].extend([1.0 / (idx - prev_index)] * (idx - prev_index))
-                        prev_index = idx  # 更新上一索引
+                        prev_index = idx 
                     
-                    # 处理最后一个索引后续部分
                     rewards[i].extend([0.0] * (len(episode_reward) - prev_index))
 
 

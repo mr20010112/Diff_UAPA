@@ -54,7 +54,6 @@ class RewardModel(object):
 
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
-        # 如果需要输出到控制台
         handler = logging.StreamHandler()
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
@@ -74,7 +73,7 @@ class RewardModel(object):
         rewards = np.concatenate(rewards, axis=0)
         
         self.reward_mean = np.mean(rewards)
-        self.reward_std = np.std(rewards) + 1e-6  # 避免除零
+        self.reward_std = np.std(rewards) + 1e-6
         self.logger.info(f"Global reward stats - mean: {self.reward_mean}, std: {self.reward_std}")
 
     def construct_ensemble(self):
@@ -238,81 +237,59 @@ class RewardModel(object):
         return curr_loss, correct
     
     def _r3m_train(self, batch, member, lambda_reg=0.8):
-        """
-        使用 R³M 交替优化算法训练奖励模型。
-        
-        参数：
-        - batch: 包含 observations, actions, observations_2, actions_2, labels 的字典
-        - member: 集成模型中的索引
-        - lambda_reg: R³M 中的正则化参数 λ，控制 δ 的稀疏性
-        
-        返回：
-        - curr_loss: 当前批次的损失
-        - correct: 预测准确率
-        """
-        # 获取批次数据
+
+
         obs_1 = batch['observations']  # batch_size * len_query * obs_dim
         act_1 = batch['actions']  # batch_size * len_query * action_dim
         obs_2 = batch['observations_2']
         act_2 = batch['actions_2']
         labels = batch['labels']  # batch_size * 2 (one-hot)
 
-        # 转换为 PyTorch 张量，并确保 labels 是二维的
         obs_1 = reward_utils.to_torch(obs_1).to(self.device)
         act_1 = reward_utils.to_torch(act_1).to(self.device)
         obs_2 = reward_utils.to_torch(obs_2).to(self.device)
         act_2 = reward_utils.to_torch(act_2).to(self.device)
         labels = reward_utils.to_torch(labels, dtype=torch.float32).to(self.device)  # batch_size * 2
 
-        # 确保 labels 是二维张量 (batch_size, 2)
-        if labels.dim() == 1:  # 如果是一维，增加一个维度
+        if labels.dim() == 1:
             labels = labels.unsqueeze(0)
-        elif labels.dim() > 2:  # 如果维度过高，展平为二维
+        elif labels.dim() > 2:
             labels = labels.view(-1, 2)
 
-        # 获取可比较的标签
-        # 使用 torch.all 来检查是否等于 [0.5, 0.5]
         mask = ~torch.all(labels == torch.tensor([0.5, 0.5], device=self.device), dim=1)  # batch_size
-        comparable_indices = torch.where(mask)[0]  # 可比较的样本索引
+        comparable_indices = torch.where(mask)[0]
         comparable_labels = torch.argmax(labels, dim=1)  # batch_size
 
-        # 获取奖励预测
         r_hat1 = self.ensemble[member](obs_1, act_1)  # batch_size * len_query
         r_hat2 = self.ensemble[member](obs_2, act_2)  # batch_size * len_query
         r_hat1 = r_hat1.mean(dim=-1, keepdim=True)  # batch_size * 1
         r_hat2 = r_hat2.mean(dim=-1, keepdim=True)  # batch_size * 1
 
-        # 初始化扰动因子 δ
         batch_size = obs_1.shape[0]
         delta = torch.zeros(batch_size, 1, device=self.device, requires_grad=False)  # batch_size * 1
 
-        # 步骤 1：固定奖励模型参数，更新 δ
         with torch.no_grad():
             delta_r = r_hat1 - r_hat2  # batch_size * 1
-            delta_update = torch.log(1.0 / lambda_reg - 1.0) - delta_r  # R³M 闭式解
-            delta = torch.max(delta_update, torch.zeros_like(delta))  # 确保 δ >= 0
+            delta_update = torch.log(1.0 / lambda_reg - 1.0) - delta_r
+            delta = torch.max(delta_update, torch.zeros_like(delta))
 
-        # 步骤 2：固定 δ，计算损失并准备更新奖励模型参数
-        r_diff = r_hat1 - r_hat2 + delta  # batch_size * 1，加入扰动因子
-        p_1_2 = torch.sigmoid(r_diff)  # batch_size * 1，偏好概率
-        y = labels[:, :1]  # batch_size * 1，取第一个标签（1 表示偏好 obs_1）
+        r_diff = r_hat1 - r_hat2 + delta 
+        p_1_2 = torch.sigmoid(r_diff) 
+        y = labels[:, :1]
 
-        # 计算加权交叉熵损失
         weights = torch.ones_like(y)
-        weights[torch.where(y == 0.5)] = 0.0  # 对于无明确偏好的样本，权重为 0
-        log_p_1_2 = torch.log(p_1_2 + 1e-8)  # 避免 log(0)
+        weights[torch.where(y == 0.5)] = 0.0
+        log_p_1_2 = torch.log(p_1_2 + 1e-8)
         log_1_minus_p_1_2 = torch.log(1 - p_1_2 + 1e-8)
         ce_loss = - (weights * (y * log_p_1_2 + (1 - y) * log_1_minus_p_1_2)).mean()
 
-        # 添加 δ 的 L1 正则化项
         l1_loss = lambda_reg * delta.abs().mean()
         curr_loss = ce_loss + l1_loss
 
-        # 计算准确率
         r_hat = torch.cat([r_hat1, r_hat2], dim=-1)  # batch_size * 2
-        _, predicted = torch.max(r_hat.data, dim=1)  # 不使用 δ 的原始预测用于评估
+        _, predicted = torch.max(r_hat.data, dim=1)
         if not len(comparable_indices):
-            correct = 0.7  # 与原代码保持一致
+            correct = 0.7
         else:
             correct = (predicted[comparable_indices] == comparable_labels[comparable_indices]).sum().item() / len(comparable_indices)
 
@@ -454,81 +431,57 @@ class TransformerRewardModel(RewardModel):
         return curr_loss, correct
     
     def _r3m_train(self, batch, member, lambda_reg=0.8):
-        """
-        使用 R³M 交替优化算法训练奖励模型。
-        
-        参数：
-        - batch: 包含 observations, actions, observations_2, actions_2, labels 的字典
-        - member: 集成模型中的索引
-        - lambda_reg: R³M 中的正则化参数 λ，控制 δ 的稀疏性
-        
-        返回：
-        - curr_loss: 当前批次的损失
-        - correct: 预测准确率
-        """
-        # 获取批次数据
         obs_1 = batch['observations']  # batch_size * len_query * obs_dim
         act_1 = batch['actions']  # batch_size * len_query * action_dim
         obs_2 = batch['observations_2']
         act_2 = batch['actions_2']
         labels = batch['labels']  # batch_size * 2 (one-hot)
 
-        # 转换为 PyTorch 张量，并确保 labels 是二维的
         obs_1 = reward_utils.to_torch(obs_1).to(self.device)
         act_1 = reward_utils.to_torch(act_1).to(self.device)
         obs_2 = reward_utils.to_torch(obs_2).to(self.device)
         act_2 = reward_utils.to_torch(act_2).to(self.device)
         labels = reward_utils.to_torch(labels, dtype=torch.float32).to(self.device)  # batch_size * 2
 
-        # 确保 labels 是二维张量 (batch_size, 2)
-        if labels.dim() == 1:  # 如果是一维，增加一个维度
+        if labels.dim() == 1:
             labels = labels.unsqueeze(0)
-        elif labels.dim() > 2:  # 如果维度过高，展平为二维
+        elif labels.dim() > 2:
             labels = labels.view(-1, 2)
 
-        # 获取可比较的标签
-        # 使用 torch.all 来检查是否等于 [0.5, 0.5]
         mask = ~torch.all(labels == torch.tensor([0.5, 0.5], device=self.device), dim=1)  # batch_size
-        comparable_indices = torch.where(mask)[0]  # 可比较的样本索引
+        comparable_indices = torch.where(mask)[0]
         comparable_labels = torch.argmax(labels, dim=1)  # batch_size
 
-        # 获取奖励预测
         r_hat1 = self.ensemble[member](obs_1, act_1)  # batch_size * len_query
         r_hat2 = self.ensemble[member](obs_2, act_2)  # batch_size * len_query
         r_hat1 = r_hat1.mean(dim=-1, keepdim=True)  # batch_size * 1
         r_hat2 = r_hat2.mean(dim=-1, keepdim=True)  # batch_size * 1
 
-        # 初始化扰动因子 δ
         batch_size = obs_1.shape[0]
         delta = torch.zeros(batch_size, 1, device=self.device, requires_grad=False)  # batch_size * 1
 
-        # 步骤 1：固定奖励模型参数，更新 δ
         with torch.no_grad():
             delta_r = r_hat1 - r_hat2  # batch_size * 1
-            delta_update = torch.log(torch.tensor(1.0 / lambda_reg - 1.0, device=self.device)) - delta_r  # R³M 闭式解
-            delta = torch.max(delta_update, torch.zeros_like(delta))  # 确保 δ >= 0
+            delta_update = torch.log(torch.tensor(1.0 / lambda_reg - 1.0, device=self.device)) - delta_r
+            delta = torch.max(delta_update, torch.zeros_like(delta))
 
-        # 步骤 2：固定 δ，计算损失并准备更新奖励模型参数
-        r_diff = r_hat1 - r_hat2 + delta  # batch_size * 1，加入扰动因子
-        p_1_2 = torch.sigmoid(r_diff)  # batch_size * 1，偏好概率
-        y = labels[:, :1]  # batch_size * 1，取第一个标签（1 表示偏好 obs_1）
+        r_diff = r_hat1 - r_hat2 + delta 
+        p_1_2 = torch.sigmoid(r_diff)
+        y = labels[:, :1]
 
-        # 计算加权交叉熵损失
         weights = torch.ones_like(y)
-        weights[torch.where(y == 0.5)] = 0.0  # 对于无明确偏好的样本，权重为 0
-        log_p_1_2 = torch.log(p_1_2 + 1e-8)  # 避免 log(0)
+        weights[torch.where(y == 0.5)] = 0.0
+        log_p_1_2 = torch.log(p_1_2 + 1e-8)
         log_1_minus_p_1_2 = torch.log(1 - p_1_2 + 1e-8)
         ce_loss = - (weights * (y * log_p_1_2 + (1 - y) * log_1_minus_p_1_2)).mean()
 
-        # 添加 δ 的 L1 正则化项
         l1_loss = lambda_reg * delta.abs().mean()
         curr_loss = ce_loss + l1_loss
 
-        # 计算准确率
         r_hat = torch.cat([r_hat1, r_hat2], dim=-1)  # batch_size * 2
-        _, predicted = torch.max(r_hat.data, dim=1)  # 不使用 δ 的原始预测用于评估
+        _, predicted = torch.max(r_hat.data, dim=1)
         if not len(comparable_indices):
-            correct = 0.7  # 与原代码保持一致
+            correct = 0.7
         else:
             correct = (predicted[comparable_indices] == comparable_labels[comparable_indices]).sum().item() / len(comparable_indices)
 

@@ -114,7 +114,7 @@ class RealRobotReplayBuffer:
             episode_ends = meta.zeros('episode_ends', shape=(0,), dtype=np.int64,
                 compressor=None, overwrite=False)
         if 'votes' not in meta:
-            votes = meta.zeros('votes', shape=(0,), dtype=np.int64, overwrite=False)  # 添加投票数据
+            votes = meta.zeros('votes', shape=(0,), dtype=np.int64, overwrite=False)
         return cls(root=root)
     
     @classmethod

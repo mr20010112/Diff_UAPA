@@ -325,7 +325,6 @@ class TrainDiffusionTransformerLowdimWorkspace(BaseWorkspace):
                 self.epoch += 1
 
         # with h5py.File('robomimic_data_0.5.h5', 'w') as f:
-        #     # 将字典的每个项存储为数据集
         #     for key, value in all_episodes.items():
         #         f.create_dataset(key, data=value)
 

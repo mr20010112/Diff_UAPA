@@ -72,7 +72,6 @@ class KitchenStepDataCallback(StepDataCallback):
     def __call__(self, env, obs, info, action=None, rew=None, terminated=None, truncated=None):
         step_data = super().__call__(env, obs, info, action, rew, terminated, truncated)
         
-        # 从obs中获取控制信息，假设前9个元素是控制信息
         step_data['info'] = {"ctrl": obs['observation'][:9]}
         
         return step_data
@@ -83,14 +82,13 @@ def generate_datasets():
         print(f'CREATING DATASET: {dst}')
         max_episode_steps = 450 if (dst == 'mixed' or dst == 'partial') else 280
         
-        # 创建原始环境
         base_env = gym.make('FrankaKitchen-v1', remove_task_when_completed=False, terminate_on_tasks_completed=False, tasks_to_complete=GOAL_TASKS[dst], max_episode_steps=max_episode_steps)
-        env = TimeLimit(base_env, max_episode_steps=max_episode_steps)  # 使用TimeLimit封装原始环境
+        env = TimeLimit(base_env, max_episode_steps=max_episode_steps)
         data_collector = DataCollector(env, step_data_callback=KitchenStepDataCallback, record_infos=True)
         
         act_mid = np.zeros(9)
         act_rng = np.ones(9) * 2
-        dataset = []  # 用于存储收集的数据
+        dataset = []
         pattern = f'/home/mrq/project/diffusion_policy-main/data/kitchen/kitchen_demos_multitask/{dir}'
         max_steps_episode = 0
         demo_subdirs = sorted(glob.glob(pattern))
@@ -102,28 +100,25 @@ def generate_datasets():
             for demo_file in demo_files:
                 episode_steps = 0
                 data = parse_mjl_logs(demo_file, 40)
-                obs, _ = data_collector.reset()  # 使用data_collector的reset方法
+                obs, _ = data_collector.reset()
                 
                 if data['ctrl'].shape[0] > max_steps_episode:
                     max_steps_episode = data['ctrl'].shape[0]
                 
                 for i_frame in range(data['ctrl'].shape[0] - 1):
-                    # 使用base_env访问robot_env属性
                     frame_skip = base_env.robot_env.frame_skip
                     timestep = base_env.robot_env.model.opt.timestep
 
                     ctrl = (data['ctrl'][i_frame] - obs['observation'][:9]) / (frame_skip * timestep)
                     act = (ctrl - act_mid) / act_rng
                     
-                    # 添加噪声
-                    noise = np.random.normal(0, 0.1, size=act.shape)  # 添加高斯噪声
+                    noise = np.random.normal(0, 0.1, size=act.shape)
                     act = act + noise
-                    act = np.clip(act, -0.999, 0.999)  # 确保动作在有效范围内
+                    act = np.clip(act, -0.999, 0.999)
                     
-                    obs, reward, terminated, truncated, env_info = data_collector.step(act)  # 使用data_collector的step方法
+                    obs, reward, terminated, truncated, env_info = data_collector.step(act)
                     episode_steps += 1
 
-        # 数据集保存逻辑，可以按需实现
         data_collector.close()      
         print(f'MAX EPISODE STEPS: {max_steps_episode}')
                 

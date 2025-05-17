@@ -251,7 +251,6 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
 
             traj_loss_1, traj_loss_2, imitation_loss, avg_traj_loss = 0, 0, 0, save_avg_traj_loss
 
-            # 计算轨迹损失 traj_loss_1
             for i in range(len(obs_1)):
                 obs_1_slide = obs_1[i]
                 action_1_slide = action_1[i]

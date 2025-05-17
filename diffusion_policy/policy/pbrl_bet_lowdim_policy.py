@@ -142,16 +142,12 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
         return loss
 
     def update_target_networks(self):
-        """软更新目标网络"""
         for param, target_param in zip(self.qf1.parameters(), self.qf1_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
         for param, target_param in zip(self.qf2.parameters(), self.qf2_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
     def compute_loss(self, batch: Dict[str, torch.Tensor], reward_model: nn.Module, stride: int = 1, avg_Traj_loss=0.0) -> Dict:
-        """
-        batch: 包含 'obs', 'action', 'next_obs' 的离线数据集
-        """
         To = self.n_obs_steps
         Ta = self.n_action_steps
         Th = self.horizon
@@ -397,8 +393,8 @@ class CQLBETLowdimPolicy(BETLowdimPolicy):
                  action_dim: int,
                  hidden_dim: int = 256,
                  gamma: float = 0.99,
-                 tau: float = 0.005,  # 增大 tau
-                 cql_alpha: float = 0.1,  # 减小 cql_alpha
+                 tau: float = 0.005,
+                 cql_alpha: float = 0.1,
                  num_samples: int = 10,
                  bc_alpha: float = 0.05):
         super().__init__(action_ae, obs_encoding_net, state_prior, horizon, 
@@ -446,7 +442,6 @@ class CQLBETLowdimPolicy(BETLowdimPolicy):
         self.step = 0
 
     def get_optimizers(self, cfg: DictConfig) -> Dict[str, torch.optim.Optimizer]:
-        # 使用较低的学习率
         return {
             'actor': self.state_prior.get_optimizer(**cfg.optimizer.actor),
             'qf1': torch.optim.Adam(self.qf1.parameters(), **cfg.optimizer.qf1),
@@ -506,7 +501,6 @@ class CQLBETLowdimPolicy(BETLowdimPolicy):
         Th = self.horizon
         batch_size = batch["obs"].shape[0]
 
-        # 数据预处理
         observations_1 = batch["obs"].to(self.device)
         actions_1 = batch["action"].to(self.device)
         observations_2 = batch["obs_2"].to(self.device)
@@ -529,18 +523,12 @@ class CQLBETLowdimPolicy(BETLowdimPolicy):
         obs_2 = slice_episode(whole_obs_2, horizon=max(Th, To+Ta), stride=stride)
         action_2 = slice_episode(whole_action_2, horizon=max(Th, To+Ta), stride=stride)
 
-        # # 调试：打印切片后的形状
-        # if self.step % 100 == 0:
-        #     print(f"Step {self.step}: sliced obs_1[0] shape={obs_1[0].shape}, sliced action_1[0] shape={action_1[0].shape}")
-
-        # 使用列表累加损失
         critic_losses = []
         actor_losses = []
         qf1_losses = []
         qf2_losses = []
         cql_losses = []
 
-        # 处理第一个 batch
         for i in range(len(obs_1)):
             obs_slide = obs_1[i]
             action_slide = action_1[i]
@@ -637,7 +625,6 @@ class CQLBETLowdimPolicy(BETLowdimPolicy):
             if self.step % 2 == 0:
                 self.update_target_networks()
 
-        # 处理第二个 batch
         for i in range(len(obs_2)):
             obs_slide = obs_2[i]
             action_slide = action_2[i]
@@ -740,7 +727,6 @@ class CQLBETLowdimPolicy(BETLowdimPolicy):
             if self.step % 2 == 0:
                 self.update_target_networks()
 
-        # 计算平均损失
         losses = {
             'critic_loss': torch.mean(torch.stack(critic_losses)),
             'actor_loss': torch.mean(torch.stack(actor_losses)),
@@ -766,7 +752,7 @@ class CQLBETLowdimPolicy(BETLowdimPolicy):
         
         optimizers['qf1'].step()
         optimizers['qf2'].step()
-        optimizers['actor'].step()  # 恢复演员更新
+        optimizers['actor'].step()
         
         lr_schedulers['qf1'].step()
         lr_schedulers['qf2'].step()

@@ -148,14 +148,12 @@ def compute_all_traj_loss_realrobot(replay_buffer=None, model=None, ref_model=No
         camera_keys = observations_1['images'].keys()
         qpos_keys = [key for key in observations_1.keys() if key != 'images']
 
-        # 保持原有图像处理逻辑，但进行性能优化
         for key in camera_keys:
             img_data_1 = observations_1['images'][key]
             img_data_2 = observations_2['images'][key]
             decompressed_images_1 = []
             decompressed_images_2 = []
 
-            # 处理第一组图像
             for k in range(img_data_1.shape[0]):
                 image = img_data_1[k, :, :int(compress_len_1[k, 0])].copy()
                 with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -167,7 +165,6 @@ def compute_all_traj_loss_realrobot(replay_buffer=None, model=None, ref_model=No
             decompressed_images_1 = np.einsum('b k h w c -> b k c h w', decompressed_images_1)
             observations_1[key] = torch.from_numpy(decompressed_images_1 / 255.0).float()
 
-            # 处理第二组图像
             for k in range(img_data_2.shape[0]):
                 image = img_data_2[k, :, :int(compress_len_2[k, 0])].copy()
                 with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -182,7 +179,6 @@ def compute_all_traj_loss_realrobot(replay_buffer=None, model=None, ref_model=No
             del img_data_1, img_data_2, decompressed_images_1, decompressed_images_2
             torch.cuda.empty_cache()
 
-        # 批量转换所有非图像数据
         for key in qpos_keys:
             observations_1[key] = torch.from_numpy(observations_1[key]).float()
             observations_2[key] = torch.from_numpy(observations_2[key]).float()
@@ -190,13 +186,11 @@ def compute_all_traj_loss_realrobot(replay_buffer=None, model=None, ref_model=No
         del data
         torch.cuda.empty_cache()
 
-        # 禁用梯度
         for param in ref_model.parameters():
             param.requires_grad = False
 
         ref_model = ref_model.to(model.device)
 
-        # 规范化数据
         obs_1 = model.normalizer.normalize(observations_1)
         action_1 = model.normalizer['action'].normalize(actions_1)
         obs_2 = model.normalizer.normalize(observations_2)
@@ -205,7 +199,6 @@ def compute_all_traj_loss_realrobot(replay_buffer=None, model=None, ref_model=No
         start_1 = random.randint(0, model.n_obs_steps)
         start_2 = random.randint(0, model.n_obs_steps)
         
-        # 切片轨迹
         obs_1 = {key: slice_episode(obs_1[key], horizon=model.horizon, stride=stride, start=start_1) for key in obs_1.keys()}
         action_1 = slice_episode(action_1, horizon=model.horizon, stride=stride, start=start_1)
         obs_2 = {key: slice_episode(obs_2[key], horizon=model.horizon, stride=stride, start=start_2) for key in obs_2.keys()}
@@ -215,9 +208,8 @@ def compute_all_traj_loss_realrobot(replay_buffer=None, model=None, ref_model=No
         timesteps_1 = torch.randint(0, model.noise_scheduler.config.num_train_timesteps, (bsz,), device=model.device).long()
         timesteps_2 = torch.randint(0, model.noise_scheduler.config.num_train_timesteps, (bsz,), device=model.device).long()
 
-        # 计算轨迹损失的优化函数
         def compute_traj_image_loss(obs_slices, action_slices, timesteps, model, ref_model):
-            with torch.no_grad():  # 确保所有操作都在无梯度模式下执行
+            with torch.no_grad(): 
                 total_loss = torch.zeros(action_slices.shape[0], device=model.device)
                 To = model.n_obs_steps
                 batch_size = action_slices.shape[0]
@@ -233,39 +225,31 @@ def compute_all_traj_loss_realrobot(replay_buffer=None, model=None, ref_model=No
                     global_cond_ref = None
 
                     if model.obs_as_global_cond:
-                        # 处理全局条件
                         this_nobs = dict_apply(obs_slide, 
                             lambda x: x[:,:To,...].reshape(-1, *x.shape[2:]))
                         nobs_features = model.obs_encoder(this_nobs)
                         nobs_features_ref = ref_model.obs_encoder(this_nobs)
                         
-                        # 重塑回 B, Do
                         global_cond = nobs_features.reshape(batch_size, -1)
                         global_cond_ref = nobs_features_ref.reshape(batch_size, -1)
                         trajectory = action_slide
                     else:
-                        # 处理局部条件
                         this_nobs = dict_apply(obs_slide, 
                             lambda x: x.reshape(-1, *x.shape[2:]))
                         nobs_features = model.obs_encoder(this_nobs)
                         nobs_features_ref = ref_model.obs_encoder(this_nobs)
                         
-                        # 重塑回 B, T, Do
                         nobs_features = nobs_features.reshape(batch_size, horizon, -1)
                         nobs_features_ref = nobs_features_ref.reshape(batch_size, horizon, -1)
                         
-                        # 连接动作和观察特征
                         trajectory = torch.cat([action_slide, nobs_features], dim=-1)
                         trajectory_ref = torch.cat([action_slide, nobs_features_ref], dim=-1)
 
-                    # 生成条件掩码
                     condition_mask = model.mask_generator(trajectory.shape).to(model.device)
                     loss_mask = (~condition_mask).float()
 
-                    # 生成噪声
                     noise = torch.randn(trajectory.shape, device=model.device)
 
-                    # 添加噪声
                     noisy_trajectory = model.noise_scheduler.add_noise(trajectory, noise, timesteps)
                     noisy_trajectory[condition_mask] = trajectory[condition_mask]
                     
@@ -275,13 +259,11 @@ def compute_all_traj_loss_realrobot(replay_buffer=None, model=None, ref_model=No
                     else:
                         noisy_trajectory_ref = noisy_trajectory.clone()
 
-                    # 模型预测
                     pred = model.model(noisy_trajectory, timesteps, 
                                       local_cond=local_cond, global_cond=global_cond)
                     pred_ref = ref_model.model(noisy_trajectory_ref if not model.obs_as_global_cond else noisy_trajectory, 
                                              timesteps, local_cond=local_cond, global_cond=global_cond_ref)
 
-                    # 确定目标类型
                     pred_type = model.noise_scheduler.config.prediction_type
                     if pred_type == 'epsilon':
                         target = noise
@@ -290,21 +272,17 @@ def compute_all_traj_loss_realrobot(replay_buffer=None, model=None, ref_model=No
                     else:
                         raise ValueError(f"Unsupported prediction type {pred_type}")
 
-                    # 计算损失
                     loss = F.mse_loss(pred, target, reduction='none')
                     loss_ref = F.mse_loss(pred_ref, target, reduction='none')
                     
-                    # 应用掩码并减少维度
                     loss = loss * loss_mask
                     loss_ref = loss_ref * loss_mask
                     loss = reduce(loss, 'b t ... -> b t (...)', 'mean')
                     loss_ref = reduce(loss_ref, 'b t ... -> b t (...)', 'mean')
                     
-                    # 计算本轮损失并更新总损失
                     slice_loss = torch.sum(loss_ref - loss, dim=1)
                     total_loss += slice_loss
                     
-                    # 显式释放内存
                     del trajectory, noise, noisy_trajectory, pred, pred_ref
                     if not model.obs_as_global_cond:
                         del trajectory_ref, noisy_trajectory_ref
@@ -313,19 +291,15 @@ def compute_all_traj_loss_realrobot(replay_buffer=None, model=None, ref_model=No
 
                 return total_loss
 
-        # 计算两个轨迹的损失
         with torch.no_grad():
-            # 计算轨迹1的损失
+
             traj_loss_1 = compute_traj_image_loss(obs_1, action_1, timesteps_1, model, ref_model)
             
-            # 计算轨迹2的损失
             traj_loss_2 = compute_traj_image_loss(obs_2, action_2, timesteps_2, model, ref_model)
 
-            # 平均损失
             loss = (traj_loss_1 + traj_loss_2) / 2
             final_loss = torch.mean(loss)
 
-        # 显式清理内存
         del obs_1, obs_2, action_1, action_2, traj_loss_1, traj_loss_2, loss
         torch.cuda.empty_cache()
 

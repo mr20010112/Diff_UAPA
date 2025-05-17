@@ -29,6 +29,7 @@ from diffusion_policy.common.json_logger import JsonLogger
 from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
 from diffusion_policy.model.diffusion.ema_model import EMAModel
 from diffusion_policy.model.common.lr_scheduler import get_scheduler
+from diffusion_policy.model.common.slice import slice_episode
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
@@ -225,21 +226,24 @@ class TrainDiffusionRealRobotWorkspace(BaseWorkspace):
                     with torch.no_grad():
                         # sample trajectory from training set, and evaluate difference
                         batch = dict_apply(train_sampling_batch, lambda x: x.to(device, non_blocking=True))
-                        obs_dict = batch['obs']
-                        for key in obs_dict.keys():
-                            obs_dict[key] = obs_dict[key][:, :self.model.n_obs_steps, ...]
-                        gt_action = batch['action'][:, self.model.n_obs_steps-1:self.model.n_obs_steps+self.model.n_action_steps-1, ...]
-                        
-                        result = policy.predict_action(obs_dict)
-                        pred_action = result['action']
-                        mse = torch.nn.functional.mse_loss(pred_action, gt_action)
-                        step_log['train_action_mse_error'] = mse.item()
-                        del batch
-                        del obs_dict
-                        del gt_action
-                        del result
-                        del pred_action
-                        del mse
+                        obs = batch['obs']
+                        act = batch['action']
+                        for key in obs.keys():
+                            obs[key] = slice_episode(obs[key], self.model.horizon, 1)
+                        act = slice_episode(act, self.model.horizon, 1)
+                        mse_total = 0
+                        for i in range(len(act)):
+                            obs_dict = {}
+                            for key in obs.keys():
+                                obs_dict[key] = obs[key][i, :, :self.model.n_obs_steps, ...]
+                            gt_action = act[i, :, self.model.n_obs_steps-1:self.model.n_action_steps+self.model.n_obs_steps-1, ...]
+                            result = policy.predict_action(obs_dict)
+                            pred_action = result['action']
+                            mse = torch.nn.functional.mse_loss(pred_action, gt_action)
+                            mse_total += mse.item()
+
+                        step_log['train_action_mse_error'] = mse_total / len(act)
+                        del batch, obs, act
                 
                 # checkpoint
                 if (self.epoch % cfg.training.checkpoint_every) == 0:

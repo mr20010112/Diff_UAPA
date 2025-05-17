@@ -26,7 +26,6 @@ from typing import Optional, Dict
 from diffusion_policy.common.prior_utils_vae import RealRobotBetaNetwork
 from diffusion_policy.model.vision.realrobot_image_obs_encoder import RealRobotImageObsEncoder
 
-#处理 "kitchen" 任务的低维数据集。该类从 .mjl 文件中解析数据，存储在 ReplayBuffer 中，并对数据进行采样
 class RLHF_RealRobotDataset(BaseImageDataset):
     def __init__(self,
                 dataset_1: BaseImageDataset,
