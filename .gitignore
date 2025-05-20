@@ -10,3 +10,6 @@ __pycache__/
 *.ckpt
 
 .vscode/launch.json
+
+*.png
+*.log
