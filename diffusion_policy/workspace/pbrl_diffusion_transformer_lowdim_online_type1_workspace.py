@@ -15,7 +15,7 @@ import pathlib
 from torch.utils.data import DataLoader
 import copy
 import random
-import wandb
+import swanlab as wandb #change
 import tqdm
 import numpy as np
 import shutil
@@ -124,13 +124,13 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
         # configure dataset
         dataset_1: BaseLowdimDataset
-        dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1)
+        dataset_1 = hydra.utils.instantiate(cfg.task.origin_dataset) #dataset_1
         #device = torch.device(cfg.training.device_cpu)
         assert isinstance(dataset_1, BaseLowdimDataset)
 
         # configure dataset
         dataset_2: BaseLowdimDataset
-        dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2)
+        dataset_2 = hydra.utils.instantiate(cfg.task.origin_dataset) #dataset_2
         # expert_normalizer = normal_dataset.get_normalizer()
         assert isinstance(dataset_2, BaseLowdimDataset)
 
