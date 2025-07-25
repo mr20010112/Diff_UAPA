@@ -22,12 +22,12 @@ obs_as_cond: True
 pred_action_steps_only: False
 
 policy: 
-  _target_: diffusion_policy.policy.ours_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_
+  _target_: diffusion_policy.policy.ipo_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_
 
   model: 
     _target_: diffusion_policy.model.diffusion.transformer_for_diffusion.TransformerForDiffusion
-    input_dim: 10
-    output_dim: 10
+    input_dim: ${eval:'${action_dim} if ${obs_as_cond} else ${obs_dim} + ${action_dim}'}
+    output_dim: ${policy.model.input_dim}
     horizon: ${horizon}
     n_obs_steps: ${n_obs_steps}
     cond_dim: ${obs_dim}
@@ -44,17 +44,17 @@ policy:
     n_cond_layers: 0 # >0: use transformer encoder for cond, otherwise use MLP
 
   noise_scheduler:
-    _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
+    _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler #ddpm
     num_train_timesteps: 100
     beta_start: 0.0001
     beta_end: 0.02
     beta_schedule: squaredcos_cap_v2
-    variance_type: fixed_small # Yilun's paper uses fixed_small_log instead, but easy to cause Nan
+    # variance_type: fixed_small # Yilun's paper uses fixed_small_log instead, but easy to cause Nan
     clip_sample: True # required when predict_epsilon=False
     prediction_type: epsilon # or sample
 
   gamma: ${gamma}
-  beta: 1.0e-4 #dpo:0.0005; cpl:0.00003125; ours:1.0e-4
+  beta: 0.0001 #dpo:0.0005; cpl:0.00003125; ours:1.0e-4
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
   bias_reg: 0.25
