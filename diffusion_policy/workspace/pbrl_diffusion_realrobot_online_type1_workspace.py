@@ -257,7 +257,7 @@ class PbrlDiffusionRealRobotWorkspace(BaseWorkspace):
                             avg_traj_loss = 0.0
                             if cfg.training.map.use_map:
                                 avg_traj_loss = compute_all_traj_loss_realrobot(replay_buffer = pref_dataset.pref_replay_buffer, \
-                                                                      model = self.model, ref_model = ref_policy.model, stride=cfg.stride) #change
+                                                                      model = self.model, ref_model = ref_policy.model, stride=cfg.stride)
                             raw_loss = self.model.compute_loss(batch, stride=cfg.stride, ref_model=ref_policy, avg_traj_loss=avg_traj_loss)
                             loss = raw_loss / cfg.training.gradient_accumulate_every
                             loss.backward()

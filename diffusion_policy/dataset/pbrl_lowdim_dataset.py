@@ -292,7 +292,7 @@ class Pbrl_Hdf5LowdimDataset(BaseLowdimDataset):
             max_value = torch.max(torch.cat([alpha, beta, alpha_2, beta_2]))
             min_value = torch.min(torch.cat([alpha, beta, alpha_2, beta_2]))
 
-            target_min, target_max = 1, 3
+            target_min, target_max = 10, 20 #change:1,3
 
             alpha = scale_tensor(alpha, min_value, max_value, target_min, target_max)
             beta = scale_tensor(beta, min_value, max_value, target_min, target_max)

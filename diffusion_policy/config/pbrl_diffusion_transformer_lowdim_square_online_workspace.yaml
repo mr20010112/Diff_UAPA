@@ -22,7 +22,7 @@ obs_as_cond: True
 pred_action_steps_only: False
 
 policy: 
-  _target_: diffusion_policy.policy.ipo_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_ or others
+  _target_: diffusion_policy.policy.ours_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_ or others
 
   model: 
     _target_: diffusion_policy.model.diffusion.transformer_for_diffusion.TransformerForDiffusion
@@ -44,7 +44,7 @@ policy:
     n_cond_layers: 0 # >0: use transformer encoder for cond, otherwise use MLP
 
   noise_scheduler:
-    _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler #scheduling_ddpm.DDPMScheduler
+    _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler #scheduling_ddpm.DDPMScheduler
     num_train_timesteps: 100
     beta_start: 0.0001
     beta_end: 0.02
@@ -53,7 +53,7 @@ policy:
     prediction_type: epsilon # or sample
 
   gamma: ${gamma}
-  beta: 0.000167 #dpo:0.0000167; cpl:0.00003125; ours:0.0001336
+  beta: 0.0001336 #dpo:0.0000167; cpl:0.00003125; ours:0.0001336
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
   bias_reg: 0.5
@@ -134,8 +134,8 @@ training:
     reverse_freq: 1
     update_history: False
   map:
-    use_map: False
-    map_ratio: 0.25
+    use_map: True #False
+    map_ratio: 1 #change:0.25
 
 
 logging:

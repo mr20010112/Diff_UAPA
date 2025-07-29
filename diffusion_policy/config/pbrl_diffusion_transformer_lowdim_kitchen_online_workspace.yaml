@@ -22,7 +22,7 @@ obs_as_cond: True
 pred_action_steps_only: False
 
 policy: 
-  _target_: diffusion_policy.policy.cpl_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_
+  _target_: diffusion_policy.policy.ours_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_
 
   model: 
     _target_: diffusion_policy.model.diffusion.transformer_for_diffusion.TransformerForDiffusion
@@ -74,7 +74,7 @@ policy:
 ema:
   _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
   update_after_step: 0
-  inv_gamma: 1.0 #change
+  inv_gamma: 1.0
   power: 0.75
   min_value: 0.0
   max_value: 0.9999
@@ -108,15 +108,15 @@ training:
   lr_scheduler: cosine
   # Transformer needs LR warmup
   lr_warmup_steps: 0
-  num_epochs: 10
+  num_epochs: 200 #change
   # lr_end: 1.0e-8
   # power: 1.5
   gradient_accumulate_every: 1
   use_ema: True
   # training loop control
   # in epochs
-  rollout_every: 25
-  checkpoint_every: 25
+  rollout_every: 10
+  checkpoint_every: 100
   val_every: 1
   sample_every: 5
   # steps per epoch
@@ -127,10 +127,10 @@ training:
   dataset_1_dir: 'data/kitchen/Minari/normal/base_0.5/kitchen_data_0.5.h5'
   dataset_2_dir: 'data/kitchen/Minari/normal/base_0.5/kitchen_data_0.5.h5'
   online:
-    num_groups: 1 #4
+    num_groups: 4 #4
     all_votes: 100
     reverse_ratio: 0.2
-    reverse_rate: 0.5 #0.25, 0.5, 0.75
+    reverse_rate: 0.25 #0.25, 0.5, 0.75
     reverse_freq: 1
     update_history: False
   map:

@@ -249,7 +249,7 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
 
         bsz = obs_1[0].shape[0]
         loss = 0
-        ipo_target = 1 / (2 * 10)
+        ipo_target = 1 / (2 * 20)
 
         for _ in range(self.train_time_samples[0]):
             timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=self.device).long()
@@ -307,12 +307,14 @@ class DiffusionTransformerLowdimPolicy(BaseLowdimPolicy):
                 mask_2 = (self.horizon + (i-1)*stride) <= length_2
                 mask_2 = mask_2.int()
 
-                slice_loss = torch.norm(((pred_1 - pred_2)) * loss_mask_1.type(pred_1.dtype), dim=-1) ** 2
-                slice_loss_ref = torch.norm(((pred_1_ref - pred_2_ref)) * loss_mask_1.type(pred_1.dtype), dim=-1) ** 2
+                slice_loss = torch.norm(((pred_1 - noise_1)) * loss_mask_1.type(pred_1.dtype), dim=-1) ** 2
+                slice_loss_2 = torch.norm(((pred_2 - noise_2)) * loss_mask_2.type(pred_2.dtype), dim=-1) ** 2
+                slice_loss_ref = torch.norm(((pred_1_ref - noise_1)) * loss_mask_1.type(pred_1.dtype), dim=-1) ** 2
+                slice_loss_ref_2 = torch.norm(((pred_2_ref - noise_2)) * loss_mask_2.type(pred_2.dtype), dim=-1) ** 2
 
-                traj_loss += slice_loss_ref - slice_loss
+                traj_loss += (slice_loss*mask_1 - slice_loss_2*mask_2) - (slice_loss_ref*mask_1 - slice_loss_ref_2*mask_2)
 
 
-            loss += torch.mean(traj_loss - ipo_target * len(obs_1))
+            loss += torch.mean((traj_loss - ipo_target * len(obs_1)) ** 2) / len(obs_1)
 
         return torch.mean(loss)

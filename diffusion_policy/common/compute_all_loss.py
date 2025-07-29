@@ -36,6 +36,20 @@ def compute_all_traj_loss(replay_buffer=None, model:BaseImagePolicy=None, ref_mo
         observations_2 = np.array(data['obs_2'], dtype=np.float32)
         actions_2 = np.array(data['action_2'], dtype=np.float32)
 
+        total_size = len(observations_1)
+
+        # Calculate 25% of the data size
+        sample_size = int(total_size * 0.25)
+
+        # Generate random indices for sampling
+        indices = np.random.choice(total_size, size=sample_size, replace=False)
+
+        # Extract 25% of the data using the indices
+        observations_1 = observations_1[indices]
+        actions_1 = actions_1[indices]
+        observations_2 = observations_2[indices]
+        actions_2 = actions_2[indices]
+
         for param in ref_model.parameters():
             param.requires_grad = False
 
@@ -74,7 +88,7 @@ def compute_all_traj_loss(replay_buffer=None, model:BaseImagePolicy=None, ref_mo
             total_loss = 0
             
             for idx, (obs_slide, action_slide) in enumerate(zip(obs_slices, action_slices)):
-                gamma_factors = model.gamma ** (idx * model.horizon + np.arange(model.horizon))
+                gamma_factors = model.gamma ** (idx * model.horizon + torch.arange(model.horizon, device=model.device))
                 if model.obs_as_cond:
                     cond = obs_slide[:, :model.n_obs_steps, :]
                     cond = cond.detach().to(model.device)
@@ -95,10 +109,10 @@ def compute_all_traj_loss(replay_buffer=None, model:BaseImagePolicy=None, ref_mo
                     noisy_trajectory = model.noise_scheduler.add_noise(trajectory, noise, timestep)
                     noisy_trajectory[condition_mask] = trajectory[condition_mask]
 
-                    pred_ref = ref_policy.model(noisy_trajectory, timestep, cond)
+                    pred_ref = ref_policy(noisy_trajectory, timestep, cond)
                     pred = model.model(noisy_trajectory, timestep, cond)
 
-                    pred_type = self.noise_scheduler.config.prediction_type 
+                    pred_type = model.noise_scheduler.config.prediction_type 
                     if pred_type == 'epsilon':
                         target = noise
                     elif pred_type == 'sample':

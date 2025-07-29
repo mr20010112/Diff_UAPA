@@ -137,7 +137,7 @@ def reward_from_preference(
     
     return dataset
 
-class SinusoidalPosEmb(nn.Module):
+class SinusoidalPosmb(nn.Module):
     def __init__(self, dim):
         super().__init__()
         self.dim = dim

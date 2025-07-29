@@ -15,7 +15,7 @@ import pathlib
 from torch.utils.data import DataLoader
 import copy
 import random
-import swanlab as wandb #change
+import swanlab as wandb
 import tqdm
 import numpy as np
 import shutil
@@ -124,13 +124,13 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
 
         # configure dataset
         dataset_1: BaseLowdimDataset
-        dataset_1 = hydra.utils.instantiate(cfg.task.origin_dataset) #dataset_1
+        dataset_1 = hydra.utils.instantiate(cfg.task.dataset_1) #dataset_1
         #device = torch.device(cfg.training.device_cpu)
         assert isinstance(dataset_1, BaseLowdimDataset)
 
         # configure dataset
         dataset_2: BaseLowdimDataset
-        dataset_2 = hydra.utils.instantiate(cfg.task.origin_dataset) #dataset_2
+        dataset_2 = hydra.utils.instantiate(cfg.task.dataset_2) #dataset_2
         # expert_normalizer = normal_dataset.get_normalizer()
         assert isinstance(dataset_2, BaseLowdimDataset)
 
@@ -214,9 +214,9 @@ class PbrlDiffusionTransformerLowdimWorkspace(BaseWorkspace):
             
             # with torch.no_grad():
             pref_dataset.set_beta_priori(data_size=100)
-            pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=50, warm_up_epochs=2, batch_size=20, lr=2.0e-5)
-            with torch.no_grad():
-                pref_dataset.update_beta_priori(batch_size=1)
+            # pref_dataset.beta_model.online_update(dataset=pref_dataset.construct_pref_data(), num_epochs=50, warm_up_epochs=2, batch_size=20, lr=2.0e-5)
+            # with torch.no_grad():
+            #     pref_dataset.update_beta_priori(batch_size=1) #change
 
         train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
         del dataset
