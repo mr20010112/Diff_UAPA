@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - task: lift_lowdim_abs
+  - task: lift_lowdim
 
 name: train_robomimic_lowdim
 _target_: diffusion_policy.workspace.train_robomimic_lowdim_workspace.TrainRobomimicLowdimWorkspace

@@ -33,7 +33,7 @@ from diffusion_policy.model.common.normalizer import (
     SingleFieldLinearNormalizer
 )
 from diffusion_policy.common.json_logger import JsonLogger
-from diffusers.training_utils import EMAModel
+# from diffusers.training_utils import EMAModel
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
@@ -44,11 +44,11 @@ class DatacollectBETLowdimWorkspace(BaseWorkspace):
     def __init__(self, cfg: OmegaConf):
         super().__init__(cfg)
 
-        # set seed
-        seed = cfg.training.seed
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-        random.seed(seed)
+        # # set seed
+        # seed = cfg.collecting.seed
+        # torch.manual_seed(seed)
+        # np.random.seed(seed)
+        # random.seed(seed)
 
         # configure model
         self.policy: BETLowdimPolicy
@@ -62,17 +62,14 @@ class DatacollectBETLowdimWorkspace(BaseWorkspace):
         cfg = copy.deepcopy(self.cfg)
         OmegaConf.resolve(cfg)
 
-        # resume training
-        if cfg.training.resume:
-            ckpt_path = pathlib.Path(cfg.checkpoint_dir)
-            if ckpt_path.is_file():
-                print(f"Resuming from checkpoint {ckpt_path}")
-                self.load_checkpoint(path=ckpt_path, exclude_keys='optimizer')
-            self.optimizer = self.policy.get_optimizer(**cfg.optimizer)
-            self.global_step = 0
-            self.epoch = 0
+        ckpt_path = pathlib.Path(cfg.checkpoint_dir)
+        if ckpt_path.is_file():
+            print(f"Resuming from checkpoint {ckpt_path}")
+            self.load_checkpoint(path=ckpt_path, exclude_keys='optimizer')
+        self.global_step = 0
+        self.epoch = 0
 
-        device = torch.device(cfg.training.device_gpu)
+        device = torch.device(cfg.collecting.device_gpu)
 
 
         # configure env runner
@@ -83,18 +80,8 @@ class DatacollectBETLowdimWorkspace(BaseWorkspace):
         assert isinstance(env_runner, BaseLowdimRunner)
 
         # device transfer
-        device = torch.device(cfg.training.device_gpu)
+        device = torch.device(cfg.collecting.device_gpu)
         self.policy.to(device)
-        optimizer_to(self.optimizer, device)
-
-        if cfg.training.debug:
-            cfg.training.num_epochs = 2
-            cfg.training.max_train_steps = 3
-            cfg.training.max_val_steps = 3
-            cfg.training.rollout_every = 1
-            cfg.training.checkpoint_every = 1
-            cfg.training.val_every = 1
-            cfg.training.sample_every = 1
 
         all_episodes = {
             'observations': np.empty((0,cfg.task.obs_dim)),  # Time x Features
@@ -103,16 +90,15 @@ class DatacollectBETLowdimWorkspace(BaseWorkspace):
             'terminals': np.empty((0))           # Time x Features
         }
 
-        # training loop
         log_path = os.path.join(self.output_dir, 'logs.json.txt')
         with JsonLogger(log_path) as json_logger:
-            for local_epoch_idx in range(cfg.training.num_epochs):
+            for local_epoch_idx in range(cfg.collecting.num_epochs):
                 step_log = dict()
                 # ========= eval for this epoch ==========
                 self.policy.eval()
 
                 # run rollout
-                if (self.epoch % cfg.training.rollout_every) == 0:
+                if (self.epoch % cfg.collecting.rollout_every) == 0:
                     runner_log, episode = env_runner.run(self.policy)
                     all_episodes['observations'] = np.concatenate([all_episodes['observations'], episode['observations']], axis=0)
                     all_episodes['actions'] = np.concatenate([all_episodes['actions'], episode['actions']], axis=0)

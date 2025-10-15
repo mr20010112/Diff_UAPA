@@ -1,19 +1,19 @@
 defaults:
   - _self_
-  - task: transport_lowdim_abs #kitchen_lowdim_abs
+  - task: kitchen_lowdim_hdf5_abs #kitchen_lowdim_abs
 
 name: train_diffusion_transformer_lowdim
 _target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type1_workspace.PbrlDiffusionTransformerLowdimWorkspace #_type1_, _type2_
-checkpoint_dir: 'data/experiments/low_dim/robomimic/transport/diff/base/epoch=0120-test_mean_score=0.540.ckpt'
+checkpoint_dir: 'data/experiments/low_dim/kitchen/diffusion_policy_transformer/base_0.5/seed=42.ckpt'
 
 obs_dim: ${task.obs_dim}
 action_dim: ${task.action_dim}
 task_name: ${task.name}
 exp_name: "default"
 
-gamma: 0.9998
-horizon: 10
-n_obs_steps: 2
+gamma: 0.997
+horizon: 16
+n_obs_steps: 4
 n_action_steps: 8
 n_latency_steps: 0
 past_action_visible: False
@@ -22,7 +22,7 @@ obs_as_cond: True
 pred_action_steps_only: False
 
 policy: 
-  _target_: diffusion_policy.policy.ours_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_
+  _target_: diffusion_policy.policy.ipo_diffusion_transformer_lowdim_policy.DiffusionTransformerLowdimPolicy #cpl_, dpo_, ours_
 
   model: 
     _target_: diffusion_policy.model.diffusion.transformer_for_diffusion.TransformerForDiffusion
@@ -30,13 +30,13 @@ policy:
     output_dim: ${policy.model.input_dim}
     horizon: ${horizon}
     n_obs_steps: ${n_obs_steps}
-    cond_dim: ${obs_dim}
+    cond_dim: ${eval:'${obs_dim} if ${obs_as_cond} else 0'}
 
     n_layer: 8
     n_head: 4
-    n_emb: 256
+    n_emb: 768
     p_drop_emb: 0.0
-    p_drop_attn: 0.3
+    p_drop_attn: 0.1
 
     causal_attn: True
     time_as_cond: True # if false, use BERT like encoder only arch, time as input
@@ -54,7 +54,7 @@ policy:
     prediction_type: epsilon # or sample
 
   gamma: ${gamma}
-  beta: 6.68e-5 #dpo:0.0000167; cpl:3.34e-6; ours:6.68e-5
+  beta: 1.785e-06 #cpl:1.785e-06 ;dpo:1.785e-06 ours:3.57e-05
   use_map: ${training.map.use_map}
   map_ratio: ${training.map.map_ratio}
   bias_reg: 0.25
@@ -80,14 +80,14 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 25 #cpl:18, dpo:17, ours:30
+  batch_size: 18
   num_workers: 1
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 25
+  batch_size: 18
   num_workers: 1
   shuffle: True
   pin_memory: True
@@ -108,16 +108,15 @@ training:
   lr_scheduler: cosine
   # Transformer needs LR warmup
   lr_warmup_steps: 0
-  num_epochs: 100
+  num_epochs: 100 #change
   # lr_end: 1.0e-8
   # power: 1.5
-  gradient_norm_clip: 0.5
   gradient_accumulate_every: 1
   use_ema: True
   # training loop control
   # in epochs
-  rollout_every: 25
-  checkpoint_every: 25
+  rollout_every: 10
+  checkpoint_every: 10
   val_every: 1
   sample_every: 5
   # steps per epoch
@@ -125,18 +124,18 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
-  dataset_1_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.5.h5'
-  dataset_2_dir: 'data/robomimic/datasets/lift/noraml/robomimic_data_0.5_2.h5'
+  dataset_1_dir: 'data/kitchen/Minari/normal/base_0.5/kitchen_data_0.5.h5'
+  dataset_2_dir: 'data/kitchen/Minari/normal/base_0.5/kitchen_data_0.5.h5'
   online:
-    num_groups: 4
+    num_groups: 4 #4
     all_votes: 100
     reverse_ratio: 0.2
-    reverse_rate: 0.5
+    reverse_rate: 0.25 #0.25, 0.5, 0.75
     reverse_freq: 1
     update_history: False
   map:
-    use_map: False #True
-    map_ratio: 0.15
+    use_map: False # only True when use our method
+    map_ratio: 0.25
 
 
 logging:

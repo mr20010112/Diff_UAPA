@@ -67,14 +67,12 @@ class DatacollectDiffusionTransformerLowdimWorkspace(BaseWorkspace):
     def run(self):
         cfg = copy.deepcopy(self.cfg)
 
-        # resume training
-        if cfg.training.resume:
-            ckpt_path = pathlib.Path(cfg.checkpoint_dir)
-            if ckpt_path.is_file():
-                print(f"Resuming from checkpoint {ckpt_path}")
-                self.load_checkpoint(path=ckpt_path)
-            self.global_step = 0
-            self.epoch = 0
+        ckpt_path = pathlib.Path(cfg.checkpoint_dir)
+        if ckpt_path.is_file():
+            print(f"Resuming from checkpoint {ckpt_path}")
+            self.load_checkpoint(path=ckpt_path)
+        self.global_step = 0
+        self.epoch = 0
 
         # configure dataset
         dataset: BaseLowdimDataset
@@ -98,16 +96,6 @@ class DatacollectDiffusionTransformerLowdimWorkspace(BaseWorkspace):
         if self.ema_model is not None:
             self.ema_model.to(device)
         optimizer_to(self.optimizer, device)
-
-
-        if cfg.training.debug:
-            cfg.training.num_epochs = 2
-            cfg.training.max_train_steps = 3
-            cfg.training.max_val_steps = 3
-            cfg.training.rollout_every = 1
-            cfg.training.checkpoint_every = 1
-            cfg.training.val_every = 1
-            cfg.training.sample_every = 1
 
 
         all_episodes = {

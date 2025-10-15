@@ -15,7 +15,7 @@ import pathlib
 from torch.utils.data import DataLoader
 import copy
 import random
-import wandb
+import swanlab as wandb
 import tqdm
 import numpy as np
 import shutil
@@ -113,8 +113,6 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
             normalizer = LinearNormalizer()
             normalizer['action'] = SingleFieldLinearNormalizer.create_identity()
             normalizer['obs'] = SingleFieldLinearNormalizer.create_identity()
-
-        # self.policy.set_normalizer(normalizer)
 
         # # fit action_ae (K-Means)
         # self.policy.fit_action_ae(
@@ -329,7 +327,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                             if cfg.training.map.use_map:
                                 avg_traj_loss = compute_all_bet_traj_loss(replay_buffer = pref_dataset.pref_replay_buffer, \
                                                                       model = self.policy, stride=stride)
-                            raw_loss = self.policy.compute_loss(batch, ref_policy=ref_policy, stride=stride, avg_traj_loss=avg_traj_loss)
+                            raw_loss = self.policy.compute_loss(batch, ref_policy=ref_policy, stride=stride) #avg_traj_loss=avg_traj_loss
                             loss = raw_loss / cfg.training.gradient_accumulate_every
                             loss.backward()
 

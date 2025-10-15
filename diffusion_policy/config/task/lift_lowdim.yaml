@@ -18,7 +18,7 @@ env_runner:
   n_train_vis: 2
   train_start_idx: 0
   n_test: 50
-  n_test_vis: 4
+  n_test_vis: 3
   test_start_seed: 100000
   # use python's eval function as resolver, single-quoted string as argument
   max_steps: ${eval:'500 if "${task.dataset_type}" == "mh" else 400'}
@@ -33,7 +33,7 @@ env_runner:
   tqdm_interval_sec: 1.0
   n_envs: 28
 
-dataset:
+origin_dataset:
   _target_: diffusion_policy.dataset.robomimic_replay_lowdim_dataset.RobomimicReplayLowdimDataset
   dataset_path: *dataset_path
   horizon: ${horizon}
@@ -42,5 +42,32 @@ dataset:
   obs_keys: *obs_keys
   abs_action: *abs_action
   use_legacy_normalizer: False
+  rotation_rep: rotation_6d
   seed: 42
   val_ratio: 0.02
+
+dataset_1:
+  _target_: diffusion_policy.dataset.hdf5_lowdim_dataset.Hdf5LowdimDataset
+  dataset_dir: ${training.dataset_1_dir}
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+
+dataset_2:
+  _target_: diffusion_policy.dataset.hdf5_lowdim_dataset.Hdf5LowdimDataset
+  dataset_dir: ${training.dataset_2_dir}
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+
+pref_dataset:
+  _target_: diffusion_policy.dataset.pbrl_lowdim_dataset.Pbrl_Hdf5LowdimDataset
+  sequence_length: 60 #${task.env_runner.max_steps}
+  val_ratio: 0
+  N: 500
+  gamma: ${gamma}
+  gpu_device: ${training.device_gpu}
