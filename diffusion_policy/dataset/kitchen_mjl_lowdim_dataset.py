@@ -11,7 +11,6 @@ from diffusion_policy.model.common.normalizer import LinearNormalizer, SingleFie
 from diffusion_policy.dataset.base_dataset import BaseLowdimDataset
 from diffusion_policy.env.kitchen.kitchen_util import parse_mjl_logs
 
-
 class KitchenMjlLowdimDataset(BaseLowdimDataset):
     def __init__(self,
             dataset_dir,

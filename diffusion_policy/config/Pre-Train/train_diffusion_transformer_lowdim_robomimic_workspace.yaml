@@ -93,7 +93,7 @@ pred_action_steps_only: false
 task:
   abs_action: true
   action_dim: 10
-  dataset_1:
+  dataset:
     _target_: diffusion_policy.dataset.robomimic_replay_lowdim_dataset.RobomimicReplayLowdimDataset
     abs_action: true
     dataset_path: data/robomimic/datasets/lift/ph/low_dim_abs.hdf5
@@ -108,25 +108,6 @@ task:
     rotation_rep: rotation_6d
     seed: 42
     val_ratio: 0.02
-  dataset_2:
-    _target_: diffusion_policy.dataset.robomimic_replay_lowdim_dataset.RobomimicReplayLowdimDataset
-    abs_action: true
-    dataset_path: data/robomimic/datasets/lift/ph/low_dim_abs.hdf5
-    horizon: 10
-    obs_keys:
-    - object
-    - robot0_eef_pos
-    - robot0_eef_quat
-    - robot0_gripper_qpos
-    pad_after: 7
-    pad_before: 1
-    rotation_rep: rotation_6d
-    seed: 42
-    val_ratio: 0.02
-  pref_dataset:
-    _target_: diffusion_policy.dataset.rlhf_robomimic_replay_lowdim_dataset.RLHF_RobomimicReplayLowdimDataset
-    sequence_length: 240
-    N: 300
   dataset_path: data/robomimic/datasets/lift/ph/low_dim_abs.hdf5
   dataset_type: ph
   env_runner:
@@ -169,16 +150,15 @@ task_name: lift_lowdim
 training:
   checkpoint_every: 50
   debug: false
-  device_cpu: "cpu"
-  device_gpu: "cuda:0"
+  device: cuda:0
   gradient_accumulate_every: 1
   lr_scheduler: cosine
   lr_warmup_steps: 1000
   max_train_steps: null
   max_val_steps: null
-  num_epochs: 200
+  num_epochs: 8000
   resume: true
-  rollout_every: 25
+  rollout_every: 50
   sample_every: 5
   seed: 42
   tqdm_interval_sec: 1.0

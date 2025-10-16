@@ -48,7 +48,7 @@ env_runner:
 # evaluation at this config requires a 16 core 64GB instance.
 
 dataset:
-  _target_: diffusion_policy.dataset.robomimic_replay_image_dataset.RobomimicReplayImageDataset
+  _target_: diffusion_policy.dataset.pre_train_robomimic_replay_image_dataset.RobomimicReplayImageDataset
   shape_meta: *shape_meta
   dataset_path: *dataset_path
   horizon: ${horizon}
