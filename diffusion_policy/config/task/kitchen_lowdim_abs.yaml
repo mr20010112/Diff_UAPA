@@ -36,9 +36,3 @@ dataset:
   robot_noise_ratio: ${task.robot_noise_ratio}
   seed: 42
   val_ratio: 0.02
-
-pref_dataset:
-  _target_: diffusion_policy.dataset.rlhf_kitchen_lowdim_dataset.RLHF_KitchenLowdimDataset
-  sequence_length: 240
-  N: 100
-  gamma: ${gamma}

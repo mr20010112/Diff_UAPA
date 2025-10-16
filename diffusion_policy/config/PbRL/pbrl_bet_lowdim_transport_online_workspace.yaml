@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - task: transport_lowdim
+  - task: pbrl_transport_lowdim
 
 name: train_bet_lowdim
 _target_: diffusion_policy.workspace.pbrl_bet_lowdim_online_workspace.PbrlBETLowdimWorkspace

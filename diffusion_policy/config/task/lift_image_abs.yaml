@@ -47,7 +47,7 @@ env_runner:
   n_envs: 28
 # evaluation at this config requires a 16 core 64GB instance.
 
-origin_dataset:
+dataset:
   _target_: diffusion_policy.dataset.robomimic_replay_image_dataset.RobomimicReplayImageDataset
   shape_meta: *shape_meta
   dataset_path: *dataset_path
@@ -61,29 +61,3 @@ origin_dataset:
   use_cache: True
   seed: 42
   val_ratio: 0.02
-
-dataset_1:
-  _target_: diffusion_policy.dataset.hdf5_lowdim_dataset.Hdf5LowdimDataset
-  dataset_dir: ${training.dataset_1_dir}
-  horizon: ${horizon}
-  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
-  pad_after: ${eval:'${n_action_steps}-1'}
-  seed: 42
-  val_ratio: 0.02
-
-dataset_2:
-  _target_: diffusion_policy.dataset.hdf5_lowdim_dataset.Hdf5LowdimDataset
-  dataset_dir: ${training.dataset_2_dir}
-  horizon: ${horizon}
-  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
-  pad_after: ${eval:'${n_action_steps}-1'}
-  seed: 42
-  val_ratio: 0.02
-
-pref_dataset:
-  _target_: diffusion_policy.dataset.pbrl_image_dataset.Pbrl_Hdf5ImageDataset
-  sequence_length: 60 #${task.env_runner.max_steps}
-  val_ratio: 0
-  N: 500
-  gamma: ${gamma}
-  gpu_device: ${training.device_gpu}

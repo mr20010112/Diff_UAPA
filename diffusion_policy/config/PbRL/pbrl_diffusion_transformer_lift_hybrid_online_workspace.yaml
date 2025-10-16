@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - task: lift_image_abs
+  - task: pbrl_lift_image_abs
 
 name: pbrl_diffusion_transformer_hybrid
 _target_: diffusion_policy.workspace.pbrl_diffusion_transformer_hybrid_online_type1_workspace.PbrlDiffusionTransformerHybridWorkspace

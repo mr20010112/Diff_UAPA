@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - task: can_lowdim_abs #kitchen_lowdim_abs
+  - task: pbrl_can_lowdim_abs #kitchen_lowdim_abs
 
 name: train_diffusion_transformer_lowdim
 _target_: diffusion_policy.workspace.pbrl_diffusion_transformer_lowdim_online_type1_workspace.PbrlDiffusionTransformerLowdimWorkspace #_type1_, _type2_

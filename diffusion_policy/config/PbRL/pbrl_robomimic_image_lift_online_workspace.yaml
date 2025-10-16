@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - task: lift_image
+  - task: pbrl_lift_image
 
 name: pbrl_robomimic_image
 _target_: diffusion_policy.workspace.pbrl_robomimic_image_workspace.PbrlRobomimicImageWorkspace

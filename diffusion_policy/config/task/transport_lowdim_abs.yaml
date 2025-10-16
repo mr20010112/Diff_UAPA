@@ -36,7 +36,7 @@ env_runner:
   n_envs: 28
 # evaluation at this config requires a 16 core 64GB instance.
 
-origin_dataset:
+dataset:
   _target_: diffusion_policy.dataset.robomimic_replay_lowdim_dataset.RobomimicReplayLowdimDataset
   dataset_path: *dataset_path
   horizon: ${horizon}
@@ -47,11 +47,3 @@ origin_dataset:
   use_legacy_normalizer: False
   seed: 42
   val_ratio: 0.02
-
-pref_dataset:
-  _target_: diffusion_policy.dataset.pbrl_lowdim_dataset.Pbrl_Hdf5LowdimDataset
-  sequence_length: 600 #${task.env_runner.max_steps}
-  val_ratio: 0
-  N: 500
-  gamma: ${gamma}
-  gpu_device: ${training.device_gpu}

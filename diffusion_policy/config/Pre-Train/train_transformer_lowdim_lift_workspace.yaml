@@ -147,7 +147,7 @@ task_name: lift_lowdim
 training:
   checkpoint_every: 50
   debug: false
-  device: cuda:0
+  device_gpu: cuda:0
   gradient_accumulate_every: 1
   lr_scheduler: cosine
   lr_warmup_steps: 1000

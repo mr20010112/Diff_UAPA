@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - task: kitchen_lowdim_hdf5_abs
+  - task: pbrl_kitchen_lowdim_hdf5_abs
 
 name: train_bet_lowdim
 _target_: diffusion_policy.workspace.pbrl_bet_lowdim_online_workspace.PbrlBETLowdimWorkspace
