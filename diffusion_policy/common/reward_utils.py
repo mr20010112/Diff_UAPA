@@ -11,6 +11,24 @@ Batch = collections.namedtuple(
     'Batch',
     ['observations', 'actions', 'rewards', 'masks', 'next_observations'])
 
+
+class SinusoidalPosEmb(nn.Module):
+    def __init__(self, dim: int, theta: int = 10000):
+        super().__init__()
+        self.dim = dim
+        self.theta = theta
+
+    def forward(self, x):
+        """
+        x: (batch,)
+        return: (batch, dim)
+        """
+        device, half_dim = x.device, self.dim // 2
+        emb = math.log(self.theta) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
+        emb = x.unsqueeze(1) * emb.unsqueeze(0)          # (B, half_dim)
+        return torch.cat([emb.sin(), emb.cos()], dim=-1) # (B, dim)
+
 def to_torch(x, dtype=torch.float32):
     if isinstance(x, np.ndarray):
         return torch.from_numpy(x).to(dtype)

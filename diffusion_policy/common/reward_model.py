@@ -9,6 +9,7 @@ import torchvision.models as models
 import diffusion_policy.common.reward_utils as reward_utils
 import logging
 from torch.optim.lr_scheduler import SequentialLR, LinearLR, CosineAnnealingLR
+from tqdm import tqdm
 
 def index_batch(batch, indices):
     indexed = {}
@@ -117,7 +118,7 @@ class RewardModel(object):
             for _ in range(self.ensemble_size):
                 batch_shuffled_idx.append(np.random.permutation(pref_dataset["observations"].shape[0]))
 
-            for i in range(interval):
+            for i in tqdm(range(interval), desc='Reward Training: Epoch ' + str(epoch)):
                 self.opt.zero_grad()
                 total_loss = 0
                 start_pt = i * batch_size
@@ -169,7 +170,7 @@ class RewardModel(object):
             for _ in range(self.ensemble_size):
                 batch_shuffled_idx.append(np.random.permutation(pref_dataset["observations"].shape[0]))
 
-            for i in range(interval):
+            for i in tqdm(range(interval), desc='Reward Training: Epoch ' + str(epoch)):
                 self.opt.zero_grad()
                 total_loss = 0
                 start_pt = i * batch_size

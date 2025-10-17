@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - task: halfcheetah_expert
+  - task: pbrl_halfcheetah_expert
 
 name: train_bet_lowdim
 _target_: diffusion_policy.workspace.pbrl_reward_bet_lowdim_online_workspace.PbrlBETLowdimWorkspace
@@ -24,7 +24,7 @@ obs_as_global_cond: False
 pred_action_steps_only: False
 
 policy:
-  _target_: diffusion_policy.policy.pbrl_bet_lowdim_policy.CQLBETLowdimPolicy
+  _target_: diffusion_policy.policy.pbrl_bet_lowdim_policy.TD3BCBETLowdimPolicy
 
   action_ae:
     _target_: diffusion_policy.model.bet.action_ae.discretizers.k_means.KMeansDiscretizer
@@ -61,7 +61,6 @@ policy:
   n_action_steps: ${n_action_steps}
   action_dim: ${action_dim}
   obs_dim: ${obs_dim}
-  num_samples: 25
   tau: 0.001
   bc_alpha: 0.01
 
@@ -70,7 +69,7 @@ reward_model:
   observation_dim: ${obs_dim}
   action_dim: ${action_dim}
   structure_type: "transformer1"
-  ensemble_size: 3
+  ensemble_size: 1
   d_model: 256
   num_layers: 2
   max_seq_len: 100
@@ -82,8 +81,8 @@ reward_model:
 reward_training:
   lr: 2.0e-4
   batch_size: 30
-  n_epochs: 200
-  warm_up_epochs: 10
+  n_epochs: 20
+  warm_up_epochs: 0
   data_size: ${task.pref_dataset.N}
 
 dataloader:

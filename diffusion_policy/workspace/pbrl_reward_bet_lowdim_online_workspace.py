@@ -300,7 +300,7 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                     'actions_2': self.policy.normalizer['action'].normalize(pref_dataset.pref_replay_buffer.data['action_2']).cpu().numpy(),
                     'labels': labels 
                 }
-                # self.reward_model.train(pref_dataset=pref_data, **cfg.reward_training)
+                # self.reward_model.train(pref_dataset=pref_data, **cfg.reward_training) #change
 
                 train_dataloader = DataLoader(pref_dataset, **cfg.dataloader)
                 for local_epoch_idx in range(cfg.training.num_epochs):
@@ -316,14 +316,9 @@ class PbrlBETLowdimWorkspace(BaseWorkspace):
                                 train_sampling_batch = batch
 
                             # compute loss
-                            # torch.autograd.set_detect_anomaly(True)
+                            torch.autograd.set_detect_anomaly(True)
                             stride = self.policy.n_obs_steps
                             raw_loss = self.policy.train_step(batch, self.optimizers, lr_schedulers, self.reward_model, stride=stride)
-
-                            # # clip grad norm
-                            # torch.nn.utils.clip_grad_norm_(
-                            #     self.policy.state_prior.parameters(), cfg.training.grad_norm_clip
-                            # )
 
                             # logging
                             step_log = {

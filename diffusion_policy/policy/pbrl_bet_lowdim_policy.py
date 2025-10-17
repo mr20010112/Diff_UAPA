@@ -15,6 +15,7 @@ from diffusion_policy.model.bet.latent_generators.mingpt import MinGPT
 from diffusion_policy.model.bet.libraries.batch_loss_fn import BatchFocalLoss, soft_cross_entropy
 from diffusion_policy.model.bet.utils import eval_mode
 from diffusion_policy.model.common.slice import slice_episode
+from copy import deepcopy
 
 class TD3BCBETLowdimPolicy(BETLowdimPolicy):
     def __init__(self, 
@@ -45,6 +46,9 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
         self.alpha = alpha
         self.bc_alpha = bc_alpha
 
+        self.action_ae_target = deepcopy(self.action_ae)
+        self.obs_encoding_net_target = deepcopy(self.obs_encoding_net)
+        self.state_prior_target = deepcopy(self.state_prior)
         
         self.qf1 = nn.Sequential(
             nn.Linear(obs_dim + action_dim, hidden_dim),
@@ -80,12 +84,11 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
         self.qf2_target.load_state_dict(self.qf2.state_dict())
         
         self.step = 0
-
-    def get_optimizers(self, learning_rate: float, weight_decay: float, betas: Tuple[float, float] = (0.9, 0.999)) -> Dict[str, torch.optim.Optimizer]:
+    def get_optimizers(self, cfg: DictConfig) -> Dict[str, torch.optim.Optimizer]:
         return {
-            'actor': self.state_prior.get_optimizer(weight_decay=0.1, learning_rate=learning_rate, betas=betas),
-            'qf1': torch.optim.Adam(self.qf1.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=betas),
-            'qf2': torch.optim.Adam(self.qf2.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=betas),
+            'actor': self.state_prior.get_optimizer(**cfg.optimizer.actor),
+            'qf1': torch.optim.Adam(self.qf1.parameters(), **cfg.optimizer.qf1),
+            'qf2': torch.optim.Adam(self.qf2.parameters(), **cfg.optimizer.qf2),
         }
 
     def get_pred_loss(
@@ -141,13 +144,21 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
 
         return loss
 
-    def update_target_networks(self):
+    def update_critic_target(self):
         for param, target_param in zip(self.qf1.parameters(), self.qf1_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
         for param, target_param in zip(self.qf2.parameters(), self.qf2_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+    
+    def update_actor_target(self):
+        for parm, target_parm in zip(self.state_prior.parameters(), self.state_prior_target.parameters()):
+            target_parm.data.copy_(self.tau * parm.data + (1 - self.tau) * target_parm.data)
+        for parm, target_parm in zip(self.obs_encoding_net.parameters(), self.obs_encoding_net_target.parameters()):
+            target_parm.data.copy_(self.tau * parm.data + (1 - self.tau) * target_parm.data)
+        for parm, target_parm in zip(self.action_ae.parameters(), self.action_ae_target.parameters()):
+            target_parm.data.copy_(self.tau * parm.data + (1 - self.tau) * target_parm.data)
 
-    def compute_loss(self, batch: Dict[str, torch.Tensor], reward_model: nn.Module, stride: int = 1, avg_Traj_loss=0.0) -> Dict:
+    def compute_loss_critic(self, batch: Dict[str, torch.Tensor], reward_model: nn.Module, stride: int = 1, avg_Traj_loss=0.0) -> Dict:
         To = self.n_obs_steps
         Ta = self.n_action_steps
         Th = self.horizon
@@ -163,7 +174,7 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
         length_2 = batch["length_2"].to(self.device).detach()
 
         batch_1 = {
-            'obs': observations_1,  # Already tensors, no need to recreate
+            'obs': observations_1,
             'action': actions_1,
         }
 
@@ -185,13 +196,11 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
         obs_2 = slice_episode(obs_2, horizon=2*To+Ta, stride=stride)
         action_2 = slice_episode(action_2, horizon=2*To+Ta, stride=stride)
 
-        # Initialize as Python lists
-        critic_loss_all = torch.tensor(0.0, device=self.device, requires_grad=True)
-        actor_loss_all = torch.tensor(0.0, device=self.device, requires_grad=True)
-        qf1_loss_all = torch.tensor(0.0, device=self.device, requires_grad=True)
-        qf2_loss_all = torch.tensor(0.0, device=self.device, requires_grad=True)
-        bc_loss_all = torch.tensor(0.0, device=self.device, requires_grad=True)
-        q_loss_all = torch.tensor(0.0, device=self.device, requires_grad=True)
+        critic_losses = []
+        qf1_losses = []
+        qf2_losses = []
+        
+        total_iterations = len(obs_1) + len(obs_2)
 
         # Process first batch
         for i in range(len(obs_1)):
@@ -204,15 +213,14 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
             q1 = self.qf1(torch.cat([nobs[:, -1, :], naction[:, 0, :]], dim=-1))
             q2 = self.qf2(torch.cat([nobs[:, -1, :], naction[:, 0, :]], dim=-1))
 
-            reward = torch.mean(torch.stack([
-                reward_model.ensemble[i](
-                    nobs, 
-                    naction,
-                ) for i in range(len(reward_model.ensemble))
-            ]), dim=0)
-
             with torch.no_grad():
-                next_action_pred = self.predict_action({'obs': self.normalizer['obs'].unnormalize(n_next_obs)})['action']
+                reward = torch.mean(torch.stack([
+                    reward_model.ensemble[i](
+                        nobs, 
+                        naction,
+                    ) for i in range(len(reward_model.ensemble))
+                ]), dim=0)
+                next_action_pred = self.predict_action_target({'obs': self.normalizer['obs'].unnormalize(n_next_obs)})['action']
                 noise = torch.clamp(
                     self.policy_noise * torch.randn_like(next_action_pred),
                     -self.noise_clip, self.noise_clip
@@ -220,9 +228,9 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
                 next_action = next_action_pred + noise
 
                 next_q1 = self.qf1_target(torch.cat([n_next_obs[:, -1, :], 
-                                                     self.normalizer['action'].normalize(next_action[:, 0, :])], dim=-1))
+                                                    self.normalizer['action'].normalize(next_action[:, 0, :])], dim=-1))
                 next_q2 = self.qf2_target(torch.cat([n_next_obs[:, -1, :], 
-                                                     self.normalizer['action'].normalize(next_action[:, 0, :])], dim=-1))
+                                                    self.normalizer['action'].normalize(next_action[:, 0, :])], dim=-1))
                 next_q = torch.min(next_q1, next_q2)
                 target_q = reward + self.discount * next_q
 
@@ -230,41 +238,10 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
             qf2_loss = F.mse_loss(q2, target_q)
             critic_loss = qf1_loss + qf2_loss
 
-            qf1_loss_all = qf1_loss_all + qf1_loss
-            qf2_loss_all = qf2_loss_all + qf2_loss
-            critic_loss_all = critic_loss_all + critic_loss
-
-            if self.step % self.policy_freq == 0:
-                pred_action_dict = self.predict_action({'obs': self.normalizer['obs'].unnormalize(nobs.clone())})
-                pred_action = pred_action_dict['action'].clone()
-                
-                q_values = self.qf1(torch.cat([nobs[:, -1, :], 
-                                               self.normalizer['action'].normalize(pred_action[:, -1, :])], dim=-1))
-                q_loss = -q_values.mean()
-
-                obs_slide[:,To:,:] = -2
-                obs_input = obs_slide[:, :Th, :].view(obs_slide.size(0), Th, -1)
-                enc_obs = self.obs_encoding_net(obs_input)
-                action_input = action_slide[:, :Th, :].view(action_slide.size(0), Th, -1)
-                latent = self.action_ae.encode_into_latent(action_input, enc_obs)
-
-                _, bc_loss = self.state_prior.get_latent_and_loss(
-                    obs_rep=enc_obs.clone(),
-                    target_latents=latent,
-                )
-                
-                actor_loss = q_loss + self.alpha * bc_loss
-
-                bc_loss_all = bc_loss_all + bc_loss
-                q_loss_all = q_loss_all + q_loss
-                actor_loss_all = actor_loss_all + actor_loss
-            else:
-                actor_loss = torch.tensor(0.0, device=self.device)
-                actor_loss_all = actor_loss_all + actor_loss
+            critic_losses.append(critic_loss)
 
             self.step += 1
-            if self.step % self.policy_freq == 0:
-                self.update_target_networks()
+            
 
         # Process second batch
         for i in range(len(obs_2)):
@@ -277,14 +254,146 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
             q1 = self.qf1(torch.cat([nobs[:, -1, :], naction[:, 0, :]], dim=-1))
             q2 = self.qf2(torch.cat([nobs[:, -1, :], naction[:, 0, :]], dim=-1))
 
-            reward = torch.mean(torch.stack([
-                reward_model.ensemble[i](
-                    self.normalizer['obs'].unnormalize(nobs), 
-                    self.normalizer['action'].unnormalize(naction),
-                ) for i in range(len(reward_model.ensemble))
-            ]), dim=0)
+            with torch.no_grad():
+                reward = torch.mean(torch.stack([
+                    reward_model.ensemble[i](
+                        self.normalizer['obs'].unnormalize(nobs), 
+                        self.normalizer['action'].unnormalize(naction),
+                    ) for i in range(len(reward_model.ensemble))
+                ]), dim=0)
+                next_action_pred = self.predict_action_target({'obs': self.normalizer['obs'].unnormalize(n_next_obs)})['action']
+                noise = torch.clamp(
+                    self.policy_noise * torch.randn_like(next_action_pred),
+                    -self.noise_clip, self.noise_clip
+                )
+                next_action = next_action_pred + noise
+
+                next_q1 = self.qf1_target(torch.cat([n_next_obs[:, -1, :], 
+                                                    self.normalizer['action'].normalize(next_action[:, 0, :])], dim=-1))
+                next_q2 = self.qf2_target(torch.cat([n_next_obs[:, -1, :], 
+                                                    self.normalizer['action'].normalize(next_action[:, 0, :])], dim=-1))
+                next_q = torch.min(next_q1, next_q2)
+                target_q = reward + self.discount * next_q
+
+            qf1_loss = F.mse_loss(q1, target_q)
+            qf2_loss = F.mse_loss(q2, target_q)
+            critic_loss = qf1_loss + qf2_loss
+
+            critic_losses.append(critic_loss)
+            self.step += 1
+
+
+        total_count = total_iterations
+        losses = {
+            'critic_loss': torch.stack(critic_losses).sum() / total_count,
+        }
+        
+        return losses
+    
+    def compute_loss_actor(self, batch: Dict[str, torch.Tensor], reward_model: nn.Module, stride: int = 1, avg_Traj_loss=0.0) -> Dict:
+        To = self.n_obs_steps
+        Ta = self.n_action_steps
+        Th = self.horizon
+
+        # Move data to device
+        observations_1 = batch["obs"].to(self.device)
+        actions_1 = batch["action"].to(self.device)
+        votes_1 = batch["votes"].to(self.device)
+        length_1 = batch["length"].to(self.device).detach()
+        observations_2 = batch["obs_2"].to(self.device)
+        actions_2 = batch["action_2"].to(self.device)
+        votes_2 = batch["votes_2"].to(self.device)
+        length_2 = batch["length_2"].to(self.device).detach()
+
+        batch_1 = {
+            'obs': observations_1,
+            'action': actions_1,
+        }
+
+        batch_2 = {
+            'obs': observations_2,
+            'action': actions_2,
+        }
+
+        nbatch_1 = self.normalizer.normalize(batch_1)
+        nbatch_2 = self.normalizer.normalize(batch_2)
+
+        obs_1 = nbatch_1['obs']
+        action_1 = nbatch_1['action']
+        obs_2 = nbatch_2['obs']
+        action_2 = nbatch_2['action']
+
+        obs_1 = slice_episode(obs_1, horizon=2*To+Ta, stride=stride)
+        action_1 = slice_episode(action_1, horizon=2*To+Ta, stride=stride)
+        obs_2 = slice_episode(obs_2, horizon=2*To+Ta, stride=stride)
+        action_2 = slice_episode(action_2, horizon=2*To+Ta, stride=stride)
+
+        critic_losses = []
+        qf1_losses = []
+        qf2_losses = []
+        actor_losses = []
+        bc_losses = []
+        q_losses = []
+        
+        total_iterations = len(obs_1) + len(obs_2)
+        policy_update_count = 0
+
+        # Process first batch
+        for i in range(len(obs_1)):
+            obs_slide = obs_1[i]
+            action_slide = action_1[i]
+            nobs = obs_slide[:, :To, :]
+            naction = action_slide[:, To-1:To+Ta-1, :]
+            n_next_obs = obs_slide[:, To+Ta-1:2*To+Ta-1, :]
+
+            obs_slide_for_actor = obs_slide.clone()
+            obs_slide_for_actor[:, To:, :] = -2
+            
+            pred_action_dict = self.predict_action({'obs': self.normalizer['obs'].unnormalize(nobs.clone())})
+            pred_action = pred_action_dict['action'].clone()
+            
+            q_values = self.qf1(torch.cat([nobs[:, -1, :], 
+                                        self.normalizer['action'].normalize(pred_action[:, -1, :])], dim=-1))
+            q_loss = -q_values.mean()
+
+            obs_input = obs_slide_for_actor[:, :Th, :].view(obs_slide_for_actor.size(0), Th, -1)
+            enc_obs = self.obs_encoding_net(obs_input)
+            action_input = action_slide[:, :Th, :].view(action_slide.size(0), Th, -1)
+            latent = self.action_ae.encode_into_latent(action_input, enc_obs)
+
+            _, bc_loss = self.state_prior.get_latent_and_loss(
+                obs_rep=enc_obs.clone(),
+                target_latents=latent,
+            )
+            
+            actor_loss = q_loss + self.alpha * bc_loss
+
+            actor_losses.append(actor_loss)
+            bc_losses.append(bc_loss)
+            q_losses.append(q_loss)
+            policy_update_count += 1
+
+            self.step += 1
+            
+
+        # Process second batch
+        for i in range(len(obs_2)):
+            obs_slide = obs_2[i]
+            action_slide = action_2[i]
+            nobs = obs_slide[:, :To, :]
+            naction = action_slide[:, To-1:To+Ta-1, :]
+            n_next_obs = obs_slide[:, To+Ta-1:2*To+Ta-1, :]
+
+            q1 = self.qf1(torch.cat([nobs[:, -1, :], naction[:, 0, :]], dim=-1))
+            q2 = self.qf2(torch.cat([nobs[:, -1, :], naction[:, 0, :]], dim=-1))
 
             with torch.no_grad():
+                reward = torch.mean(torch.stack([
+                    reward_model.ensemble[i](
+                        self.normalizer['obs'].unnormalize(nobs), 
+                        self.normalizer['action'].unnormalize(naction),
+                    ) for i in range(len(reward_model.ensemble))
+                ]), dim=0)
                 next_action_pred = self.predict_action({'obs': self.normalizer['obs'].unnormalize(n_next_obs)})['action']
                 noise = torch.clamp(
                     self.policy_noise * torch.randn_like(next_action_pred),
@@ -293,9 +402,9 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
                 next_action = next_action_pred + noise
 
                 next_q1 = self.qf1_target(torch.cat([n_next_obs[:, -1, :], 
-                                                     self.normalizer['action'].normalize(next_action[:, 0, :])], dim=-1))
+                                                    self.normalizer['action'].normalize(next_action[:, 0, :])], dim=-1))
                 next_q2 = self.qf2_target(torch.cat([n_next_obs[:, -1, :], 
-                                                     self.normalizer['action'].normalize(next_action[:, 0, :])], dim=-1))
+                                                    self.normalizer['action'].normalize(next_action[:, 0, :])], dim=-1))
                 next_q = torch.min(next_q1, next_q2)
                 target_q = reward + self.discount * next_q
 
@@ -303,83 +412,133 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
             qf2_loss = F.mse_loss(q2, target_q)
             critic_loss = qf1_loss + qf2_loss
 
-            # Append to lists
-            qf1_loss_all = qf1_loss_all + qf1_loss
-            qf2_loss_all = qf2_loss_all + qf2_loss
-            critic_loss_all = critic_loss_all + critic_loss
+            critic_losses.append(critic_loss)
+            qf1_losses.append(qf1_loss)
+            qf2_losses.append(qf2_loss)
+            
+            obs_slide_for_actor = obs_slide.clone()
+            obs_slide_for_actor[:, To:, :] = -2
+            
+            pred_action_dict = self.predict_action({'obs': self.normalizer['obs'].unnormalize(nobs.clone())})
+            pred_action = pred_action_dict['action'].clone()
+            
+            q_values = self.qf1(torch.cat([nobs[:, -1, :], 
+                                        self.normalizer['action'].normalize(pred_action[:, -1, :])], dim=-1))
+            q_loss = -q_values.mean()
 
-            if self.step % self.policy_freq == 0:
-                pred_action_dict = self.predict_action({'obs': self.normalizer['obs'].unnormalize(nobs.clone())})
-                pred_action = pred_action_dict['action'].clone()
-                
-                q_values = self.qf1(torch.cat([nobs[:, -1, :], 
-                                               self.normalizer['action'].normalize(pred_action[:, -1, :])], dim=-1))
-                q_loss = -q_values.mean()
+            obs_input = obs_slide_for_actor[:, :Th, :].view(obs_slide_for_actor.size(0), Th, -1)
+            enc_obs = self.obs_encoding_net(obs_input)
+            action_input = action_slide[:, :Th, :].view(action_slide.size(0), Th, -1)
+            latent = self.action_ae.encode_into_latent(action_input, enc_obs)
 
-                obs_slide[:,To:,:] = -2
-                obs_input = obs_slide[:, :Th, :].view(obs_slide.size(0), Th, -1)
-                enc_obs = self.obs_encoding_net(obs_input)
-                action_input = action_slide[:, :Th, :].view(action_slide.size(0), Th, -1)
-                latent = self.action_ae.encode_into_latent(action_input, enc_obs)
+            _, bc_loss = self.state_prior.get_latent_and_loss(
+                obs_rep=enc_obs.clone(),
+                target_latents=latent,
+            )
+            
+            actor_loss = q_loss + self.alpha * bc_loss
 
-                _, bc_loss = self.state_prior.get_latent_and_loss(
-                    obs_rep=enc_obs.clone(),
-                    target_latents=latent,
-                )
-                
-                actor_loss = q_loss + self.alpha * bc_loss
-
-                bc_loss_all = bc_loss_all + bc_loss
-                q_loss_all = q_loss_all + q_loss
-                actor_loss_all = actor_loss_all + actor_loss
-            else:
-                actor_loss = torch.tensor(0.0, device=self.device)
-                actor_loss_all = actor_loss_all + actor_loss
+            actor_losses.append(actor_loss)
+            bc_losses.append(bc_loss)
+            q_losses.append(q_loss)
+            policy_update_count += 1
 
             self.step += 1
 
-        if self.step % self.policy_freq == 0:
-            self.update_target_networks()
-
-        # Compute means of losses, ensuring they remain tensors with gradients
+        total_count = total_iterations
         losses = {
-            'critic_loss': critic_loss_all / (len(obs_1) + len(obs_2)),
-            'actor_loss': actor_loss_all / (len(obs_1) + len(obs_2)),
-            'qf1_loss': qf1_loss_all / (len(obs_1) + len(obs_2)),
-            'qf2_loss': qf2_loss_all / (len(obs_1) + len(obs_2)),
-            'bc_loss': bc_loss_all / (len(obs_1) + len(obs_2)) if  (self.step % self.policy_freq == 0) 
+            'actor_loss': torch.stack(actor_losses).sum() / total_count,
+            'bc_loss': torch.stack(bc_losses).sum() / total_count if policy_update_count > 0 
                     else torch.tensor(0.0, device=self.device),
+            'qf1_loss': torch.stack(qf1_losses).sum() / total_count,
+            'qf2_loss': torch.stack(qf2_losses).sum() / total_count,
         }
         
         return losses
 
     def train_step(self, batch, optimizers, lr_schedulers, reward_model: nn.Module, stride: int = 1) -> Dict:
-        losses = self.compute_loss(batch=batch, reward_model=reward_model, stride=stride)
+        loss_critic = self.compute_loss_critic(batch=batch, reward_model=reward_model, stride=stride)
+        loss_critic = loss_critic['critic_loss']
         
         for opt in optimizers.values():
             opt.zero_grad()
         
-        losses['critic_loss'].backward()
+        loss_critic.backward()
         torch.nn.utils.clip_grad_norm_(self.qf1.parameters(), max_norm=1.0)
         torch.nn.utils.clip_grad_norm_(self.qf2.parameters(), max_norm=1.0)
         
-        if self.step % self.policy_freq == 0:
-            losses['actor_loss'].backward()
-            torch.nn.utils.clip_grad_norm_(self.state_prior.parameters(), max_norm=0.5)
-        
         optimizers['qf1'].step()
         optimizers['qf2'].step()
-        if self.step % self.policy_freq == 0:
-            optimizers['actor'].step()
         
         lr_schedulers['qf1'].step()
         lr_schedulers['qf2'].step()
-        if self.step % self.policy_freq == 0:
-            for _ in range(self.policy_freq):
-                lr_schedulers['actor'].step()
 
+        self.update_critic_target()
+        losses = loss_critic
+        
+        if self.step % self.policy_freq == 0:
+            # torch.autograd.set_detect_anomaly(True)
+            loss_actor = self.compute_loss_actor(batch=batch, reward_model=reward_model, stride=stride)
+            loss_actor = loss_actor['actor_loss']
+            loss_actor.backward()
+            torch.nn.utils.clip_grad_norm_(self.state_prior.parameters(), max_norm=0.5)
+            
+            optimizers['actor'].step()
+            
+            lr_schedulers['actor'].step()
+
+            self.update_actor_target()
+
+            losses.update(loss_actor)
+        
+        self.step += 1
+        
         return losses
 
+    def predict_action_target(self, obs_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """
+        obs_dict: must include "obs" key
+        result: must include "action" key
+        """
+        assert 'obs' in obs_dict
+        assert 'past_action' not in obs_dict # not implemented yet
+        nobs = self.normalizer['obs'].normalize(obs_dict['obs'])
+        B, _, Do = nobs.shape
+        To = self.n_obs_steps
+        T = self.horizon
+
+        # pad To to T
+        obs = torch.full((B,T,Do), -2, dtype=nobs.dtype, device=nobs.device)
+        obs[:,:To,:] = nobs[:,:To,:]
+
+        # (B,T,Do)
+        enc_obs = self.obs_encoding_net_target(obs)
+
+        # Sample latents from the prior
+        latents, offsets = self.state_prior_target.generate_latents(enc_obs)
+
+        # un-descritize
+        naction_pred = self.action_ae_target.decode_actions(
+            latent_action_batch=(latents, offsets)
+        )
+        # (B,T,Da)
+
+        # un-normalize
+        action_pred = self.normalizer['action'].unnormalize(naction_pred)
+
+        # get action
+        start = To - 1
+        end = start + self.n_action_steps
+        action = action_pred[:,start:end]
+        result = {
+            'action': action,
+            'action_pred': action_pred
+        }
+        return result
+       
+    def fit_action_ae(self, input_actions: torch.Tensor):
+        self.action_ae.fit_discretizer(input_actions=input_actions)
+        self.action_ae_target.fit_discretizer(input_actions=input_actions)
 
 class CQLBETLowdimPolicy(BETLowdimPolicy):
     def __init__(self, 
