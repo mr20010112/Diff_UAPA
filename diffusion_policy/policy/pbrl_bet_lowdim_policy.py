@@ -457,8 +457,8 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
         return losses
 
     def train_step(self, batch, optimizers, lr_schedulers, reward_model: nn.Module, stride: int = 1) -> Dict:
-        loss_critic = self.compute_loss_critic(batch=batch, reward_model=reward_model, stride=stride)
-        loss_critic = loss_critic['critic_loss']
+        loss_critic_dict = self.compute_loss_critic(batch=batch, reward_model=reward_model, stride=stride)
+        loss_critic = loss_critic_dict['critic_loss']
         
         for opt in optimizers.values():
             opt.zero_grad()
@@ -474,12 +474,12 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
         lr_schedulers['qf2'].step()
 
         self.update_critic_target()
-        losses = loss_critic
+        losses = loss_critic_dict
         
         if self.step % self.policy_freq == 0:
             # torch.autograd.set_detect_anomaly(True)
-            loss_actor = self.compute_loss_actor(batch=batch, reward_model=reward_model, stride=stride)
-            loss_actor = loss_actor['actor_loss']
+            loss_actor_dict = self.compute_loss_actor(batch=batch, reward_model=reward_model, stride=stride)
+            loss_actor = loss_actor_dict['actor_loss']
             loss_actor.backward()
             torch.nn.utils.clip_grad_norm_(self.state_prior.parameters(), max_norm=0.5)
             
@@ -489,7 +489,7 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
 
             self.update_actor_target()
 
-            losses.update(loss_actor)
+            losses.update(loss_actor_dict)
         
         self.step += 1
         
@@ -538,7 +538,7 @@ class TD3BCBETLowdimPolicy(BETLowdimPolicy):
        
     def fit_action_ae(self, input_actions: torch.Tensor):
         self.action_ae.fit_discretizer(input_actions=input_actions)
-        self.action_ae_target.fit_discretizer(input_actions=input_actions)
+        self.action_ae_target = deepcopy(self.action_ae)
 
 class CQLBETLowdimPolicy(BETLowdimPolicy):
     def __init__(self, 
