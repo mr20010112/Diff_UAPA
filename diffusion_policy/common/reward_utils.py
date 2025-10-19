@@ -11,6 +11,85 @@ Batch = collections.namedtuple(
     'Batch',
     ['observations', 'actions', 'rewards', 'masks', 'next_observations'])
 
+def get_constant_schedule_with_warmup(optimizer, num_warmup_steps, last_epoch=-1):
+    """
+    Creates a learning rate schedule with a linear warmup phase followed by a constant learning rate.
+    
+    Args:
+        optimizer: The optimizer for which to adjust the learning rate (e.g., PyTorch optimizer).
+        num_warmup_steps: Number of steps for the linear warmup phase.
+        last_epoch: The index of the last epoch (default: -1 for starting from scratch).
+    
+    Returns:
+        A scheduler object with a get_lr method to compute the learning rate for each step.
+    """
+    class ConstantScheduleWithWarmup:
+        def __init__(self, optimizer, num_warmup_steps, last_epoch=-1):
+            self.optimizer = optimizer
+            self.num_warmup_steps = max(num_warmup_steps, 1)  # Ensure at least 1 to avoid division by zero
+            self.last_epoch = last_epoch
+            self.base_lrs = [group['lr'] for group in optimizer.param_groups]  # Store initial learning rates
+            
+        def step(self):
+            """
+            Updates the learning rate for each parameter group in the optimizer.
+            Called at each training step.
+            """
+            self.last_epoch += 1
+            lr = self.get_lr()
+            for i, param_group in enumerate(self.optimizer.param_groups):
+                param_group['lr'] = lr[i]
+        
+        def get_lr(self):
+            """
+            Computes the learning rate for each parameter group based on the current step.
+            
+            Returns:
+                List of learning rates for each parameter group.
+            """
+            if self.last_epoch < self.num_warmup_steps:
+                # Linear warmup: lr increases linearly from 0 to base_lr over num_warmup_steps
+                multiplier = self.last_epoch / self.num_warmup_steps
+            else:
+                # Constant phase: lr remains at base_lr
+                multiplier = 1.0
+            return [base_lr * multiplier for base_lr in self.base_lrs]
+    
+    return ConstantScheduleWithWarmup(optimizer, num_warmup_steps, last_epoch)
+
+class RunningMeanStd:
+    def __init__(self, mean=0, std=1.0, epsilon=np.finfo(np.float32).eps.item(), 
+                 mode='common', lr=0.1):
+        self.mean, self.var = mean, std
+        self.max = mean
+        self.count = 0
+        self.eps = epsilon
+        self.lr = lr
+        self.mode = mode
+
+    def update(self, data_array) -> None:
+        """Add a batch of item into RMS with the same shape, modify mean/var/count."""
+        batch_mean, batch_var = np.mean(data_array, axis=0), np.var(data_array, axis=0)
+        batch_count = len(data_array)
+
+        delta = batch_mean - self.mean
+        total_count = self.count + batch_count
+
+        if self.mode == 'common':
+            new_mean = self.mean + delta * batch_count / total_count
+            new_max = self.max + (np.max(data_array)-self.max) / total_count
+        else:
+            new_mean = self.mean + delta * self.lr
+            new_max = self.max + (np.max(data_array)-self.max) * self.lr
+        
+        m_a = self.var * self.count
+        m_b = batch_var * batch_count
+        m_2 = m_a + m_b + delta**2 * self.count * batch_count / total_count
+        new_var = m_2 / total_count
+
+        self.mean, self.var = new_mean, new_var
+        self.count = total_count
+        self.max = new_max
 
 class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim: int, theta: int = 10000):
