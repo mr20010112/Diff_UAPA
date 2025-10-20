@@ -72,8 +72,10 @@ class RewardModel(object):
         self.capacity = 10000  # Buffer capacity
         self.buffer_index = 0
         self.buffer_full = False
-        self.buffer_seg1 = None
-        self.buffer_seg2 = None
+        self.buffer_seg_act_1 = None
+        self.buffer_seg_obs_1 = None
+        self.buffer_seg_act_2 = None
+        self.buffer_seg_obs_2 = None
         self.buffer_label = None
         self.label_margin = 0.1
         self.teacher_eps_equal = 0.1
@@ -139,8 +141,10 @@ class RewardModel(object):
 
     def initialize_buffer(self, pref_dataset):
         max_len = pref_dataset["observations"].shape[0]
-        self.buffer_seg1 = torch.from_numpy(np.concatenate([pref_dataset["observations"], pref_dataset["actions"]], axis=-1)).float().to(self.device)
-        self.buffer_seg2 = torch.from_numpy(np.concatenate([pref_dataset["observations_2"], pref_dataset["actions_2"]], axis=-1)).float().to(self.device)
+        self.buffer_seg_act_1 = torch.from_numpy(pref_dataset["actions"]).float().to(self.device)
+        self.buffer_seg_obs_1 = torch.from_numpy(pref_dataset["observations"]).float().to(self.device)
+        self.buffer_seg_act_2 = torch.from_numpy(pref_dataset["actions_2"]).float().to(self.device)
+        self.buffer_seg_obs_2 = torch.from_numpy(pref_dataset["observations_2"]).float().to(self.device)
         self.buffer_label = np.argmax(pref_dataset["labels"], axis=1)
         self.buffer_index = max_len
         self.buffer_full = max_len >= self.capacity
@@ -148,7 +152,7 @@ class RewardModel(object):
     def get_threshold_beta(self):
         return self.threshold_beta
 
-    def train_rime(self, pref_dataset, data_size, batch_size, n_epochs=1, warm_up_epochs=0, lr=1.0e-4, debug=False, trust_sample=True, label_flipping=True):
+    def train(self, pref_dataset, data_size, batch_size, n_epochs=1, warm_up_epochs=0, lr=1.0e-4, debug=False, trust_sample=True, label_flipping=True):
         self.train_batch_size = batch_size
         self.initialize_buffer(pref_dataset)
         
@@ -173,11 +177,12 @@ class RewardModel(object):
             p_hat_all = []
             with torch.no_grad():
                 for member in range(self.de):
-                    r_hat1 = self.r_hat_member(self.buffer_seg1[:max_len], member=member)
-                    r_hat2 = self.r_hat_member(self.buffer_seg2[:max_len], member=member)
+                    
+                    r_hat1 = self.r_hat_member(batch_obs=self.buffer_seg_obs_1[:max_len], batch_act=self.buffer_seg_act_1[:max_len], member=member)
+                    r_hat2 = self.r_hat_member(batch_obs=self.buffer_seg_obs_2[:max_len], batch_act=self.buffer_seg_act_2[:max_len], member=member)
                     r_hat1 = r_hat1.sum(axis=1)
                     r_hat2 = r_hat2.sum(axis=1)
-                    r_hat = torch.cat([r_hat1, r_hat2], axis=-1)  # (max_len, 2)
+                    r_hat = torch.cat([r_hat1.unsqueeze(-1), r_hat2.unsqueeze(-1)], dim=-1)  # (max_len, 2)
                     p_hat_all.append(F.softmax(r_hat, dim=-1).cpu())
             
             # Predict label for all ensemble members
@@ -243,18 +248,20 @@ class RewardModel(object):
 
                 for member in range(self.de):
                     idxs = total_batch_index[member][sub_epoch * self.train_batch_size:last_index]
-                    sa_t_1 = self.buffer_seg1[idxs]
-                    sa_t_2 = self.buffer_seg2[idxs]
+                    a_t_1 = self.buffer_seg_act_1[idxs]
+                    s_t_1 = self.buffer_seg_obs_1[idxs]
+                    a_t_2 = self.buffer_seg_act_2[idxs]
+                    s_t_2 = self.buffer_seg_obs_2[idxs]
                     labels = self.buffer_label[idxs]
                     labels = torch.from_numpy(labels.flatten()).long().to(self.device)
 
                     if member == 0:
                         total += labels.size(0)
 
-                    r_hat1 = self.r_hat_member(sa_t_1, member=member)
-                    r_hat2 = self.r_hat_member(sa_t_2, member=member)
-                    r_hat1 = r_hat1.sum(axis=1)
-                    r_hat2 = r_hat2.sum(axis=1)
+                    r_hat1 = self.r_hat_member(batch_obs=s_t_1, batch_act=a_t_1, member=member)
+                    r_hat2 = self.r_hat_member(batch_obs=s_t_2, batch_act=a_t_2, member=member)
+                    r_hat1 = r_hat1.sum(axis=1, keepdim=True)
+                    r_hat2 = r_hat2.sum(axis=1, keepdim=True)
                     r_hat = torch.cat([r_hat1, r_hat2], axis=-1)
 
                     if self.label_margin > 0 or self.teacher_eps_equal > 0:
@@ -339,12 +346,13 @@ class TransformerRewardModel(RewardModel):
     def __init__(self, task, observation_dim, action_dim, structure_type="transformer1",
                  ensemble_size=3, activation="tanh", d_model=256, nhead=4, num_layers=1,
                  max_seq_len=100, logger=None, device="cuda"):
-        super().__init__(task, observation_dim, action_dim, ensemble_size, activation, logger, device)
         self.structure_type = structure_type
         self.d_model = d_model
         self.nhead = nhead
         self.num_layers = num_layers
         self.max_seq_len = max_seq_len
+        # self.construct_ensemble()
+        super().__init__(task, observation_dim, action_dim, ensemble_size, activation, logger, device)
 
     def construct_ensemble(self):
         self.ensemble = []

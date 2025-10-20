@@ -5,6 +5,7 @@ from tqdm import trange
 import torch
 import torch.nn as nn
 import math
+import d4rl
 
 
 Batch = collections.namedtuple(
