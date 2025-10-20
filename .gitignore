@@ -1,5 +1,6 @@
 /data/
 /check_script/
+/.vscode/
 robomimic_image.zip
 
 __pycache__/
